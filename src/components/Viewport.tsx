@@ -60,6 +60,19 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   );
 }
 
+function blurActiveHTMLElement(svg: SVGSVGElement | null): void {
+  const activeElement = document.activeElement;
+  if (
+    activeElement === null ||
+    activeElement === document.body ||
+    activeElement === svg ||
+    !(activeElement instanceof HTMLElement)
+  ) {
+    return;
+  }
+  activeElement.blur();
+}
+
 export interface ViewportProps {
   image: ImageInfo;
   annotations: readonly Annotation[];
@@ -567,6 +580,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
+    blurActiveHTMLElement(svgRef.current);
     interactionRef.current = {
       type: "move",
       pointerId: event.pointerId,
@@ -594,6 +608,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
+    blurActiveHTMLElement(svgRef.current);
     interactionRef.current = {
       type: "resize",
       pointerId: event.pointerId,

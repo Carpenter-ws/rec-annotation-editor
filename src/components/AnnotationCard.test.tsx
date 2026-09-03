@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useReducer } from "react";
 import type { Annotation } from "../domain/types";
+import { editorReducer, initialEditorState } from "../state/editorReducer";
 import { AnnotationCard } from "./AnnotationCard";
 import { AnnotationPanel } from "./AnnotationPanel";
 
@@ -10,6 +12,38 @@ const annotation: Annotation = {
   label: "person",
   reservedField: "0",
 };
+
+function ReducerPanelHarness() {
+  const [state, dispatch] = useReducer(
+    editorReducer,
+    initialEditorState,
+    (initialState) =>
+      editorReducer(initialState, {
+        type: "LOAD_ANNOTATIONS",
+        annotations: [annotation],
+        fileName: "scene.txt",
+      }),
+  );
+
+  return (
+    <>
+      <AnnotationPanel
+        annotations={state.annotations}
+        selectedId={state.selectedId}
+        bounds={null}
+        dispatch={dispatch}
+        onLocate={vi.fn()}
+      />
+      <output data-testid="transaction-state">
+        {state.transactionBase === null ? "closed" : "open"}
+      </output>
+      <output data-testid="past-count">{state.past.length}</output>
+      <output data-testid="current-label">
+        {state.annotations[0]?.label ?? "missing"}
+      </output>
+    </>
+  );
+}
 
 function renderCard(dispatch = vi.fn()) {
   render(
@@ -21,6 +55,7 @@ function renderCard(dispatch = vi.fn()) {
       dispatch={dispatch}
       onSelect={vi.fn()}
       onLocate={vi.fn()}
+      onExpressionEditingChange={vi.fn()}
     />,
   );
   return dispatch;
@@ -120,6 +155,45 @@ it("cancels expression editing once on Escape and restores the focus-start label
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
+it.each([
+  ["blur", "updated"],
+  ["Enter", "updated"],
+  ["empty blur", ""],
+  ["Escape", "updated"],
+] as const)(
+  "reports expression editing active then inactive exactly once on %s",
+  (finish, value) => {
+    const onExpressionEditingChange = vi.fn();
+    render(
+      <AnnotationCard
+        annotation={annotation}
+        index={1}
+        bounds={{ width: 1920, height: 1080 }}
+        selected
+        dispatch={vi.fn()}
+        onSelect={vi.fn()}
+        onLocate={vi.fn()}
+        onExpressionEditingChange={onExpressionEditingChange}
+      />,
+    );
+    const input = screen.getByRole("textbox", { name: "Expression" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value } });
+
+    if (finish === "blur" || finish === "empty blur") {
+      fireEvent.blur(input);
+    } else {
+      fireEvent.keyDown(input, { key: finish });
+      fireEvent.blur(input);
+    }
+
+    expect(onExpressionEditingChange.mock.calls).toEqual([
+      ["ann_001"],
+      [null],
+    ]);
+  },
+);
+
 it("synchronizes an unfocused expression from annotation prop changes", () => {
   const dispatch = vi.fn();
   const props = {
@@ -130,6 +204,7 @@ it("synchronizes an unfocused expression from annotation prop changes", () => {
     dispatch,
     onSelect: vi.fn(),
     onLocate: vi.fn(),
+    onExpressionEditingChange: vi.fn(),
   };
   const { rerender } = render(<AnnotationCard {...props} />);
 
@@ -243,6 +318,7 @@ it("clamps a valid coordinate commit to the current image bounds", () => {
       dispatch={dispatch}
       onSelect={vi.fn()}
       onLocate={vi.fn()}
+      onExpressionEditingChange={vi.fn()}
     />,
   );
   const x1 = screen.getByRole("textbox", { name: "X1" });
@@ -277,6 +353,7 @@ it("syncs canvas-driven coordinate props except for the actively edited field", 
     dispatch: vi.fn(),
     onSelect: vi.fn(),
     onLocate: vi.fn(),
+    onExpressionEditingChange: vi.fn(),
   };
   const { rerender } = render(<AnnotationCard {...props} />);
   const x1 = screen.getByRole("textbox", { name: "X1" });
@@ -310,6 +387,7 @@ it("disables bbox editing when image bounds are unavailable", () => {
       dispatch={dispatch}
       onSelect={vi.fn()}
       onLocate={vi.fn()}
+      onExpressionEditingChange={vi.fn()}
     />,
   );
 
@@ -551,4 +629,68 @@ it("scrolls the exact selected special-character ID without CSS.escape", () => {
       delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     }
   }
+});
+
+it("retains an empty focused search match until blur cancels and restores it", async () => {
+  const user = userEvent.setup();
+  render(<ReducerPanelHarness />);
+  const search = screen.getByRole("searchbox", {
+    name: "Search annotations",
+  });
+  await user.type(search, "per");
+  const expression = screen.getByRole("textbox", { name: "Expression" });
+
+  fireEvent.focus(expression);
+  fireEvent.change(expression, { target: { value: "" } });
+
+  expect(screen.getByLabelText("Matching annotations")).toHaveTextContent(
+    "0 matches",
+  );
+  expect(expression).toBeInTheDocument();
+  expect(expression).toHaveValue("");
+  expect(screen.getByTestId("transaction-state")).toHaveTextContent("open");
+
+  fireEvent.blur(expression);
+
+  expect(screen.getByTestId("transaction-state")).toHaveTextContent("closed");
+  expect(screen.getByTestId("past-count")).toHaveTextContent("0");
+  expect(screen.getByTestId("current-label")).toHaveTextContent("person");
+  expect(expression).toHaveValue("person");
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Expression cannot be empty.",
+  );
+
+  await user.clear(search);
+  await user.type(search, "zzz");
+  expect(
+    screen.queryByRole("textbox", { name: "Expression" }),
+  ).not.toBeInTheDocument();
+});
+
+it("removes a retained search mismatch only after its valid edit commits", async () => {
+  const user = userEvent.setup();
+  render(<ReducerPanelHarness />);
+  await user.type(
+    screen.getByRole("searchbox", { name: "Search annotations" }),
+    "per",
+  );
+  const expression = screen.getByRole("textbox", { name: "Expression" });
+
+  fireEvent.focus(expression);
+  fireEvent.change(expression, { target: { value: "vehicle" } });
+
+  expect(screen.getByLabelText("Matching annotations")).toHaveTextContent(
+    "0 matches",
+  );
+  expect(expression).toBeInTheDocument();
+  expect(screen.getByTestId("transaction-state")).toHaveTextContent("open");
+
+  fireEvent.blur(expression);
+
+  expect(screen.getByTestId("transaction-state")).toHaveTextContent("closed");
+  expect(screen.getByTestId("past-count")).toHaveTextContent("1");
+  expect(screen.getByTestId("current-label")).toHaveTextContent("vehicle");
+  expect(
+    screen.queryByRole("textbox", { name: "Expression" }),
+  ).not.toBeInTheDocument();
 });

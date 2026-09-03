@@ -36,6 +36,7 @@ export interface AnnotationCardProps {
   dispatch: Dispatch<EditorAction>;
   onSelect: (id: string) => void;
   onLocate: (id: string) => void;
+  onExpressionEditingChange: (id: string | null) => void;
 }
 
 export const AnnotationCard = memo(function AnnotationCard({
@@ -46,6 +47,7 @@ export const AnnotationCard = memo(function AnnotationCard({
   dispatch,
   onSelect,
   onLocate,
+  onExpressionEditingChange,
 }: AnnotationCardProps): JSX.Element {
   const [expression, setExpression] = useState(annotation.label);
   const [expressionError, setExpressionError] = useState<string | null>(null);
@@ -99,6 +101,7 @@ export const AnnotationCard = memo(function AnnotationCard({
       setExpression(focusStartLabelRef.current);
       setExpressionError("Expression cannot be empty.");
       dispatch({ type: "CANCEL_TRANSACTION" });
+      onExpressionEditingChange(null);
       return;
     }
     setExpressionError(null);
@@ -111,6 +114,7 @@ export const AnnotationCard = memo(function AnnotationCard({
       });
     }
     dispatch({ type: "COMMIT_TRANSACTION" });
+    onExpressionEditingChange(null);
   };
 
   const cancelExpression = () => {
@@ -119,6 +123,7 @@ export const AnnotationCard = memo(function AnnotationCard({
     setExpression(focusStartLabelRef.current);
     setExpressionError(null);
     dispatch({ type: "CANCEL_TRANSACTION" });
+    onExpressionEditingChange(null);
   };
 
   const commitCoordinates = () => {
@@ -193,6 +198,7 @@ export const AnnotationCard = memo(function AnnotationCard({
             if (editingExpressionRef.current) return;
             editingExpressionRef.current = true;
             focusStartLabelRef.current = expression;
+            onExpressionEditingChange(annotation.id);
             dispatch({ type: "BEGIN_TRANSACTION" });
           }}
           onChange={(event) => {

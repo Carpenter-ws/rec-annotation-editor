@@ -27,21 +27,41 @@ export function AnnotationPanel({
   onLocate,
 }: AnnotationPanelProps): JSX.Element {
   const [query, setQuery] = useState("");
+  const [activeExpressionId, setActiveExpressionId] = useState<string | null>(
+    null,
+  );
   const panelRef = useRef<HTMLDivElement>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase();
+  const annotationEntries = useMemo(
+    () =>
+      annotations.map((annotation, index) => ({
+        annotation,
+        index: index + 1,
+        matches: annotation.label
+          .toLocaleLowerCase()
+          .includes(normalizedQuery),
+      })),
+    [annotations, normalizedQuery],
+  );
+  const matchingCount = useMemo(
+    () => annotationEntries.filter(({ matches }) => matches).length,
+    [annotationEntries],
+  );
   const visibleAnnotations = useMemo(
     () =>
-      annotations.flatMap((annotation, index) =>
-        annotation.label.toLocaleLowerCase().includes(normalizedQuery)
-          ? [{ annotation, index: index + 1 }]
-          : [],
+      annotationEntries.filter(
+        ({ annotation, matches }) =>
+          matches || annotation.id === activeExpressionId,
       ),
-    [annotations, normalizedQuery],
+    [activeExpressionId, annotationEntries],
   );
   const selectAnnotation = useCallback(
     (id: string) => dispatch({ type: "SELECT", id }),
     [dispatch],
   );
+  const handleExpressionEditingChange = useCallback((id: string | null) => {
+    setActiveExpressionId(id);
+  }, []);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -69,8 +89,8 @@ export function AnnotationPanel({
       </p>
       {normalizedQuery ? (
         <p aria-label="Matching annotations">
-          <span>{visibleAnnotations.length}</span>{" "}
-          <span>{visibleAnnotations.length === 1 ? "match" : "matches"}</span>
+          <span>{matchingCount}</span>{" "}
+          <span>{matchingCount === 1 ? "match" : "matches"}</span>
         </p>
       ) : null}
       <div>
@@ -84,6 +104,7 @@ export function AnnotationPanel({
             dispatch={dispatch}
             onSelect={selectAnnotation}
             onLocate={onLocate}
+            onExpressionEditingChange={handleExpressionEditingChange}
           />
         ))}
       </div>
