@@ -1,6 +1,12 @@
 import type { Annotation, AnnotationDocument } from "./types";
 
-const coordinate = (value: number) => value.toFixed(2);
+const coordinateFormatter = new Intl.NumberFormat("en-US", {
+  useGrouping: false,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const coordinate = (value: number) => coordinateFormatter.format(value);
 
 export function serializeAnnotationsTxt(
   annotations: readonly Annotation[],

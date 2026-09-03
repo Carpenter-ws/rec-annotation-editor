@@ -62,12 +62,12 @@ describe("parseAnnotationText", () => {
     expect(result.issues.map((issue) => issue.line)).toEqual([1, 2]);
   });
 
-  it("returns every bad line without throwing", () => {
+  it("returns every bad line and no partial annotations without throwing", () => {
     const result = parseAnnotationText(
-      "x 0 2 3 bad number 0\n1 1 1 5 invalid width 0\n1 1 5 5    ",
+      "0 0 10 10 valid annotation 0\nx 0 2 3 bad number 0\n1 1 1 5 invalid width 0\n1 1 5 5    ",
     );
 
     expect(result.annotations).toEqual([]);
-    expect(result.issues.map((issue) => issue.line)).toEqual([1, 2, 3]);
+    expect(result.issues.map((issue) => issue.line)).toEqual([2, 3, 4]);
   });
 });

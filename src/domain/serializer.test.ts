@@ -26,6 +26,32 @@ describe("serializeAnnotationsTxt", () => {
       serializeAnnotationsTxt([{ ...annotation, reservedField: null }]),
     ).toMatch(/ 0\n$/);
   });
+
+  it("expands positive and negative large coordinates with two decimals", () => {
+    expect(
+      serializeAnnotationsTxt([
+        {
+          ...annotation,
+          bbox: { x1: -1e21, y1: -1e21, x2: 1e21, y2: 1e21 },
+          label: "x",
+        },
+      ]),
+    ).toBe(
+      "-1000000000000000000000.00 -1000000000000000000000.00 1000000000000000000000.00 1000000000000000000000.00 x 0\n",
+    );
+  });
+
+  it("rounds ordinary coordinates to two decimal places", () => {
+    expect(
+      serializeAnnotationsTxt([
+        {
+          ...annotation,
+          bbox: { x1: -10.126, y1: -20.124, x2: 1.236, y2: 2.348 },
+          label: "x",
+        },
+      ]),
+    ).toBe("-10.13 -20.12 1.24 2.35 x 0\n");
+  });
 });
 
 describe("serializeDocumentJson", () => {
