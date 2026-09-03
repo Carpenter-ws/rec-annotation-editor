@@ -5,12 +5,13 @@ import {
   readTextFile,
 } from "./app/fileIO";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
+import { NewAnnotationDialog } from "./components/NewAnnotationDialog";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
 import { clampBBox } from "./domain/bbox";
 import { parseAnnotationText } from "./domain/parser";
-import type { Annotation, ImageBounds, ImageInfo } from "./domain/types";
+import type { Annotation, BBox, ImageBounds, ImageInfo } from "./domain/types";
 import {
   EditorProvider,
   useEditorDispatch,
@@ -82,6 +83,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The file could not be imported.";
 }
 
+function nextAnnotationId(nextAnnotationNumber: number): string {
+  return `ann_${String(nextAnnotationNumber).padStart(3, "0")}`;
+}
+
 function EditorWorkspace(): JSX.Element {
   const state = useEditorState();
   const dispatch = useEditorDispatch();
@@ -89,12 +94,14 @@ function EditorWorkspace(): JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   const [errorReport, setErrorReport] = useState<ErrorReport | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
+  const [draftBBox, setDraftBBox] = useState<BBox | null>(null);
   const viewportRef = useRef<ViewportHandle>(null);
   const stateRef = useRef(state);
   const importGenerationRef = useRef(0);
   const dragDepthRef = useRef(0);
   const mountedRef = useRef(true);
   const acceptedImageUrlRef = useRef<string | null>(null);
+  const pendingCenterIdRef = useRef<string | null>(null);
   stateRef.current = state;
 
   useEffect(() => {
@@ -107,6 +114,20 @@ function EditorWorkspace(): JSX.Element {
       if (acceptedUrl) URL.revokeObjectURL(acceptedUrl);
     };
   }, []);
+
+  useEffect(() => {
+    const id = pendingCenterIdRef.current;
+    if (
+      id === null ||
+      state.selectedId !== id ||
+      !state.annotations.some((annotation) => annotation.id === id)
+    ) {
+      return;
+    }
+
+    viewportRef.current?.centerAnnotation(id);
+    pendingCenterIdRef.current = null;
+  }, [state.annotations, state.selectedId]);
 
   const importFiles = async (
     files: ImportFiles,
@@ -243,6 +264,24 @@ function EditorWorkspace(): JSX.Element {
     );
   };
 
+  const addDraftAnnotation = (label: string) => {
+    if (!draftBBox) return;
+    const id = nextAnnotationId(state.nextAnnotationNumber);
+    pendingCenterIdRef.current = id;
+    dispatch({
+      type: "ADD_ANNOTATION",
+      annotation: { id, bbox: draftBBox, label, reservedField: "0" },
+    });
+    dispatch({ type: "SELECT", id });
+    dispatch({ type: "SET_MODE", mode: "select" });
+    setDraftBBox(null);
+  };
+
+  const cancelDraftAnnotation = () => {
+    setDraftBBox(null);
+    dispatch({ type: "SET_MODE", mode: "select" });
+  };
+
   return (
     <div className="app-shell">
       <Toolbar
@@ -254,6 +293,9 @@ function EditorWorkspace(): JSX.Element {
         onZoomOut={() => viewportRef.current?.zoomBy(1 / 1.2)}
         onZoomIn={() => viewportRef.current?.zoomBy(1.2)}
         onFit={() => viewportRef.current?.fit()}
+        mode={state.mode}
+        addBoxDisabled={state.image === null}
+        onAddBox={() => dispatch({ type: "SET_MODE", mode: "add" })}
       />
       <main className="editor-layout">
         <section
@@ -282,6 +324,8 @@ function EditorWorkspace(): JSX.Element {
               selectedId={state.selectedId}
               dispatch={dispatch}
               onZoomChange={setZoomScale}
+              mode={state.mode}
+              onDraftBox={setDraftBBox}
             />
           ) : (
             <p>
@@ -297,6 +341,12 @@ function EditorWorkspace(): JSX.Element {
           ))}
         </aside>
       </main>
+      {draftBBox ? (
+        <NewAnnotationDialog
+          onAdd={addDraftAnnotation}
+          onCancel={cancelDraftAnnotation}
+        />
+      ) : null}
       <StatusBar
         image={state.image}
         annotationCount={state.annotations.length}

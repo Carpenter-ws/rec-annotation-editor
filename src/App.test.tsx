@@ -114,6 +114,20 @@ function mockViewportEnvironment(width = 1000, height = 700) {
   );
 }
 
+function mockPointerEnvironment() {
+  vi.stubGlobal(
+    "PointerEvent",
+    class PointerEvent extends MouseEvent {
+      readonly pointerId: number;
+
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 0;
+      }
+    },
+  );
+}
+
 interface DeferredImageController {
   succeed: (width: number, height: number) => void;
   fail: () => void;
@@ -187,6 +201,369 @@ it("renders the provider-backed REC editor shell and semantic regions", () => {
     screen.getByRole("complementary", { name: "Annotations" }),
   ).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+});
+
+it("enters Add Box mode from the toolbar after an image loads", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("400 × 300")).toBeVisible();
+
+  const addBox = screen.getByRole("button", { name: "Add Box" });
+  expect(addBox).toBeEnabled();
+  expect(addBox).toHaveAttribute("aria-pressed", "false");
+
+  await user.click(addBox);
+
+  expect(addBox).toHaveAttribute("aria-pressed", "true");
+});
+
+it("opens a focused new-annotation dialog after drawing a box", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("400 × 300")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Add Box" }));
+
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  fireEvent.pointerDown(canvas, {
+    pointerId: 1,
+    clientX: 100,
+    clientY: 100,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 1,
+    clientX: 300,
+    clientY: 300,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 1,
+    clientX: 300,
+    clientY: 300,
+  });
+
+  const dialog = await screen.findByRole("dialog", { name: "New annotation" });
+  expect(dialog).toBeVisible();
+  const expression = screen.getByRole("textbox", { name: "Expression" });
+  expect(expression).toHaveAttribute("type", "text");
+  expect(expression).toHaveFocus();
+});
+
+it("rejects an empty trimmed expression in the new-annotation dialog", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("400 × 300")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  fireEvent.pointerDown(canvas, {
+    pointerId: 2,
+    clientX: 100,
+    clientY: 100,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 2,
+    clientX: 300,
+    clientY: 300,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 2,
+    clientX: 300,
+    clientY: 300,
+  });
+  const expression = await screen.findByRole("textbox", { name: "Expression" });
+
+  await user.type(expression, "   ");
+  await user.click(screen.getByRole("button", { name: "Add" }));
+
+  expect(screen.getByRole("dialog", { name: "New annotation" })).toHaveTextContent(
+    "Expression cannot be empty.",
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+});
+
+it("adds, selects, and centers a trimmed original-coordinate annotation", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 1000, height: 1000 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "square.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("1000 × 1000")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  fireEvent.pointerDown(canvas, {
+    pointerId: 3,
+    clientX: 220,
+    clientY: 70,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 3,
+    clientX: 290,
+    clientY: 140,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 3,
+    clientX: 290,
+    clientY: 140,
+  });
+  const expression = await screen.findByRole("textbox", { name: "Expression" });
+  reducer.mockClear();
+
+  await user.type(expression, "  vehicle  ");
+  await user.click(screen.getByRole("button", { name: "Add" }));
+
+  expect(screen.queryByRole("dialog", { name: "New annotation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+  expect(screen.getByRole("complementary", { name: "Annotations" })).toHaveTextContent(
+    "vehicle",
+  );
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("x", "100");
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("y", "100");
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("width", "100");
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("height", "100");
+  expect(screen.getByTestId("handle-nw")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Add Box" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+
+  const editActions = reducer.mock.calls
+    .map(([, action]) => action)
+    .filter(({ type }) =>
+      ["ADD_ANNOTATION", "SELECT", "SET_MODE"].includes(type),
+    );
+  expect(editActions).toEqual([
+    {
+      type: "ADD_ANNOTATION",
+      annotation: {
+        id: "ann_001",
+        bbox: { x1: 100, y1: 100, x2: 200, y2: 200 },
+        label: "vehicle",
+        reservedField: "0",
+      },
+    },
+    { type: "SELECT", id: "ann_001" },
+    { type: "SET_MODE", mode: "select" },
+  ]);
+
+  await waitFor(() => {
+    expect(
+      Number(screen.getByTestId("image-space").getAttribute("data-scale")),
+    ).toBeCloseTo(2.45, 10);
+  });
+  expect(
+    Number(screen.getByTestId("image-space").getAttribute("data-offset-x")),
+  ).toBeCloseTo(132.5, 10);
+  expect(
+    Number(screen.getByTestId("image-space").getAttribute("data-offset-y")),
+  ).toBeCloseTo(-17.5, 10);
+});
+
+it("uses the reducer next annotation number after importing annotations", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 1000, height: 1000 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "square.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("1000 × 1000")).toBeVisible();
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 10 20 20 first 0\n30 30 40 40 second 0"),
+  );
+  expect(await screen.findByText("2 annotations")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  fireEvent.pointerDown(canvas, {
+    pointerId: 6,
+    clientX: 220,
+    clientY: 70,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 6,
+    clientX: 290,
+    clientY: 140,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 6,
+    clientX: 290,
+    clientY: 140,
+  });
+  const expression = await screen.findByRole("textbox", { name: "Expression" });
+  await user.type(expression, "third");
+  reducer.mockClear();
+
+  await user.click(screen.getByRole("button", { name: "Add" }));
+
+  const addActions = reducer.mock.calls
+    .map(([, action]) => action)
+    .filter(({ type }) => type === "ADD_ANNOTATION");
+  expect(addActions).toEqual([
+    expect.objectContaining({
+      type: "ADD_ANNOTATION",
+      annotation: expect.objectContaining({ id: "ann_003", label: "third" }),
+    }),
+  ]);
+  expect(screen.getByTestId("bbox-ann_003")).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("3 annotations");
+});
+
+it("discards a new annotation draft with Cancel", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("400 × 300")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  fireEvent.pointerDown(canvas, {
+    pointerId: 4,
+    clientX: 100,
+    clientY: 100,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 4,
+    clientX: 300,
+    clientY: 300,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 4,
+    clientX: 300,
+    clientY: 300,
+  });
+  expect(
+    await screen.findByRole("dialog", { name: "New annotation" }),
+  ).toBeVisible();
+  reducer.mockClear();
+
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+  expect(screen.queryByRole("dialog", { name: "New annotation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+  expect(screen.getByRole("button", { name: "Add Box" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  expect(
+    reducer.mock.calls.some(([, action]) => action.type === "ADD_ANNOTATION"),
+  ).toBe(false);
+});
+
+it("discards a new annotation draft with Escape", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("400 × 300")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  fireEvent.pointerDown(canvas, {
+    pointerId: 5,
+    clientX: 100,
+    clientY: 100,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 5,
+    clientX: 300,
+    clientY: 300,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 5,
+    clientX: 300,
+    clientY: 300,
+  });
+  const expression = await screen.findByRole("textbox", { name: "Expression" });
+  await user.type(expression, "temporary label");
+  reducer.mockClear();
+
+  await user.keyboard("{Escape}");
+
+  expect(screen.queryByRole("dialog", { name: "New annotation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+  expect(
+    reducer.mock.calls.some(([, action]) => action.type === "ADD_ANNOTATION"),
+  ).toBe(false);
 });
 
 it("wires centered zoom controls to the viewport and status bar", async () => {

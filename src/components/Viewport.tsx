@@ -12,11 +12,18 @@ import {
 } from "react";
 import {
   fitTransform,
+  viewportToImage,
   zoomAroundPoint,
   type Point,
   type ViewTransform,
 } from "../domain/coordinates";
-import type { Annotation, ImageInfo } from "../domain/types";
+import {
+  bboxFromPoints,
+  moveBBox,
+  resizeBBox,
+  type ResizeHandle,
+} from "../domain/bbox";
+import type { Annotation, BBox, ImageInfo } from "../domain/types";
 import type { EditorAction } from "../state/editorReducer";
 
 const DEFAULT_TRANSFORM: ViewTransform = {
@@ -59,6 +66,8 @@ export interface ViewportProps {
   selectedId: string | null;
   dispatch: Dispatch<EditorAction>;
   onZoomChange: (scale: number) => void;
+  mode: "select" | "add";
+  onDraftBox: (bbox: BBox) => void;
   initialTransform?: ViewTransform;
 }
 
@@ -68,11 +77,44 @@ export interface ViewportHandle {
   zoomBy(factor: number): void;
 }
 
+type PointerInteraction =
+  | {
+      type: "pan";
+      pointerId: number;
+      startViewport: Point;
+      startTransform: ViewTransform;
+    }
+  | {
+      type: "move";
+      pointerId: number;
+      id: string;
+      startImage: Point;
+      startBBox: BBox;
+    }
+  | {
+      type: "resize";
+      pointerId: number;
+      id: string;
+      handle: ResizeHandle;
+      startBBox: BBox;
+    }
+  | {
+      type: "draw";
+      pointerId: number;
+      startImage: Point;
+      currentImage: Point;
+    };
+
 interface AnnotationBoxProps {
   annotation: Annotation;
   selected: boolean;
   scale: number;
   onSelect: (event: MouseEvent<SVGGElement>) => void;
+  onPointerDown: (event: PointerEvent<SVGGElement>) => void;
+  onResizePointerDown: (
+    event: PointerEvent<SVGRectElement>,
+    handle: ResizeHandle,
+  ) => void;
 }
 
 function AnnotationBox({
@@ -80,13 +122,26 @@ function AnnotationBox({
   selected,
   scale,
   onSelect,
+  onPointerDown,
+  onResizePointerDown,
 }: AnnotationBoxProps): JSX.Element {
   const { x1, y1, x2, y2 } = annotation.bbox;
   const width = x2 - x1;
   const height = y2 - y1;
+  const handleSize = 10 / scale;
+  const handles: readonly [ResizeHandle, Point][] = [
+    ["nw", { x: x1, y: y1 }],
+    ["n", { x: (x1 + x2) / 2, y: y1 }],
+    ["ne", { x: x2, y: y1 }],
+    ["e", { x: x2, y: (y1 + y2) / 2 }],
+    ["se", { x: x2, y: y2 }],
+    ["s", { x: (x1 + x2) / 2, y: y2 }],
+    ["sw", { x: x1, y: y2 }],
+    ["w", { x: x1, y: (y1 + y2) / 2 }],
+  ];
 
   return (
-    <g onClick={onSelect}>
+    <g onClick={onSelect} onPointerDown={onPointerDown}>
       <rect
         x={x1}
         y={y1}
@@ -110,9 +165,26 @@ function AnnotationBox({
         vectorEffect="non-scaling-stroke"
       />
       {selected ? (
-        <text x={x1} y={y1} dy={-6 / scale} fontSize={14 / scale}>
-          {annotation.label}
-        </text>
+        <>
+          <text x={x1} y={y1} dy={-6 / scale} fontSize={14 / scale}>
+            {annotation.label}
+          </text>
+          {handles.map(([handle, center]) => (
+            <rect
+              key={handle}
+              data-testid={`handle-${handle}`}
+              x={center.x - handleSize / 2}
+              y={center.y - handleSize / 2}
+              width={handleSize}
+              height={handleSize}
+              fill="#facc15"
+              stroke="#111827"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              onPointerDown={(event) => onResizePointerDown(event, handle)}
+            />
+          ))}
+        </>
       ) : null}
     </g>
   );
@@ -125,16 +197,15 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     selectedId,
     dispatch,
     onZoomChange,
+    mode,
+    onDraftBox,
     initialTransform,
   },
   ref,
 ): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
-  const panRef = useRef<{
-    pointerId: number;
-    last: Point;
-    moved: boolean;
-  } | null>(null);
+  const interactionRef = useRef<PointerInteraction | null>(null);
+  const interactionMovedRef = useRef(false);
   const suppressClickRef = useRef(false);
   const suppressClickTimerRef = useRef<number | null>(null);
   const spacePressedRef = useRef(false);
@@ -144,9 +215,37 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   const [transform, setTransform] = useState<ViewTransform>(
     initialTransform ?? DEFAULT_TRANSFORM,
   );
+  const [draftBBox, setDraftBBox] = useState<BBox | null>(null);
+
+  const releasePointerCapture = (pointerId: number) => {
+    const svg = svgRef.current;
+    if (
+      typeof svg?.releasePointerCapture === "function" &&
+      (typeof svg.hasPointerCapture !== "function" ||
+        svg.hasPointerCapture(pointerId))
+    ) {
+      svg.releasePointerCapture(pointerId);
+    }
+  };
+
+  const cancelActiveInteraction = () => {
+    const interaction = interactionRef.current;
+    if (!interaction) return;
+    if (interaction.type === "move" || interaction.type === "resize") {
+      dispatch({ type: "CANCEL_TRANSACTION" });
+    }
+    if (interaction.type === "draw") setDraftBBox(null);
+    interactionRef.current = null;
+    interactionMovedRef.current = false;
+    releasePointerCapture(interaction.pointerId);
+  };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        cancelActiveInteraction();
+        return;
+      }
       if (event.code !== "Space" || isInteractiveTarget(event.target)) return;
       event.preventDefault();
       spacePressedRef.current = true;
@@ -286,37 +385,151 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   const onPointerDown = (event: PointerEvent<SVGSVGElement>) => {
     const startsPan =
       event.button === 1 || (event.button === 0 && spacePressedRef.current);
-    if (!startsPan) return;
-    event.preventDefault();
-    panRef.current = {
-      pointerId: event.pointerId,
-      last: localPoint(event),
-      moved: false,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    fitModeRef.current = false;
+    if (startsPan) {
+      event.preventDefault();
+      interactionRef.current = {
+        type: "pan",
+        pointerId: event.pointerId,
+        startViewport: localPoint(event),
+        startTransform: transform,
+      };
+      interactionMovedRef.current = false;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      fitModeRef.current = false;
+      return;
+    }
+
+    if (
+      mode === "add" &&
+      event.button === 0 &&
+      interactionRef.current === null
+    ) {
+      event.preventDefault();
+      const startImage = viewportToImage(localPoint(event), transform);
+      interactionRef.current = {
+        type: "draw",
+        pointerId: event.pointerId,
+        startImage,
+        currentImage: startImage,
+      };
+      interactionMovedRef.current = false;
+      setDraftBBox(
+        bboxFromPoints(startImage, startImage, {
+          width: image.width,
+          height: image.height,
+        }),
+      );
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
   };
 
   const onPointerMove = (event: PointerEvent<SVGSVGElement>) => {
-    const pan = panRef.current;
-    if (!pan || pan.pointerId !== event.pointerId) return;
+    const interaction = interactionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
 
-    const point = localPoint(event);
-    const deltaX = point.x - pan.last.x;
-    const deltaY = point.y - pan.last.y;
-    if (deltaX !== 0 || deltaY !== 0) pan.moved = true;
-    pan.last = point;
-    setTransform((current) => ({
-      ...current,
-      offsetX: current.offsetX + deltaX,
-      offsetY: current.offsetY + deltaY,
-    }));
+    if (interaction.type === "pan") {
+      const point = localPoint(event);
+      const deltaX = point.x - interaction.startViewport.x;
+      const deltaY = point.y - interaction.startViewport.y;
+      if (deltaX !== 0 || deltaY !== 0) interactionMovedRef.current = true;
+      setTransform({
+        ...interaction.startTransform,
+        offsetX: interaction.startTransform.offsetX + deltaX,
+        offsetY: interaction.startTransform.offsetY + deltaY,
+      });
+      return;
+    }
+
+    if (interaction.type === "move") {
+      const point = viewportToImage(localPoint(event), transform);
+      const delta = {
+        x: point.x - interaction.startImage.x,
+        y: point.y - interaction.startImage.y,
+      };
+      if (delta.x !== 0 || delta.y !== 0) interactionMovedRef.current = true;
+      dispatch({
+        type: "PREVIEW_PATCH",
+        id: interaction.id,
+        patch: {
+          bbox: moveBBox(interaction.startBBox, delta, {
+            width: image.width,
+            height: image.height,
+          }),
+        },
+      });
+      return;
+    }
+
+    if (interaction.type === "resize") {
+      const bbox = resizeBBox(
+        interaction.startBBox,
+        interaction.handle,
+        viewportToImage(localPoint(event), transform),
+        { width: image.width, height: image.height },
+      );
+      interactionMovedRef.current =
+        bbox.x1 !== interaction.startBBox.x1 ||
+        bbox.y1 !== interaction.startBBox.y1 ||
+        bbox.x2 !== interaction.startBBox.x2 ||
+        bbox.y2 !== interaction.startBBox.y2;
+      dispatch({
+        type: "PREVIEW_PATCH",
+        id: interaction.id,
+        patch: { bbox },
+      });
+      return;
+    }
+
+    if (interaction.type === "draw") {
+      const currentImage = viewportToImage(localPoint(event), transform);
+      interactionRef.current = { ...interaction, currentImage };
+      interactionMovedRef.current =
+        currentImage.x !== interaction.startImage.x ||
+        currentImage.y !== interaction.startImage.y;
+      setDraftBBox(
+        bboxFromPoints(interaction.startImage, currentImage, {
+          width: image.width,
+          height: image.height,
+        }),
+      );
+    }
   };
 
-  const stopPan = (event: PointerEvent<SVGSVGElement>) => {
-    const pan = panRef.current;
-    if (!pan || pan.pointerId !== event.pointerId) return;
-    if (event.type === "pointerup" && pan.moved) {
+  const stopInteraction = (event: PointerEvent<SVGSVGElement>) => {
+    const interaction = interactionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    const editsAnnotation =
+      interaction.type === "move" || interaction.type === "resize";
+    if (event.type === "pointerup" && interaction.type === "draw") {
+      const endImage = viewportToImage(localPoint(event), transform);
+      interactionMovedRef.current =
+        endImage.x !== interaction.startImage.x ||
+        endImage.y !== interaction.startImage.y;
+      const bbox = bboxFromPoints(interaction.startImage, endImage, {
+        width: image.width,
+        height: image.height,
+      });
+      if (
+        (bbox.x2 - bbox.x1) * transform.scale >= 3 &&
+        (bbox.y2 - bbox.y1) * transform.scale >= 3
+      ) {
+        onDraftBox(bbox);
+      }
+      setDraftBBox(null);
+    }
+    if (event.type === "pointerup" && editsAnnotation) {
+      dispatch({ type: "COMMIT_TRANSACTION" });
+    }
+    if (event.type === "pointercancel" && editsAnnotation) {
+      dispatch({ type: "CANCEL_TRANSACTION" });
+    }
+    if (event.type === "pointercancel" && interaction.type === "draw") {
+      setDraftBBox(null);
+    }
+    if (
+      event.type === "pointerup" &&
+      interactionMovedRef.current
+    ) {
       suppressClickRef.current = true;
       if (suppressClickTimerRef.current !== null) {
         window.clearTimeout(suppressClickTimerRef.current);
@@ -326,17 +539,68 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         suppressClickTimerRef.current = null;
       }, 0);
     }
-    panRef.current = null;
-    if (
-      typeof event.currentTarget.hasPointerCapture !== "function" ||
-      event.currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
+    interactionRef.current = null;
+    interactionMovedRef.current = false;
+    releasePointerCapture(event.pointerId);
   };
 
   const onLostPointerCapture = (event: PointerEvent<SVGSVGElement>) => {
-    if (panRef.current?.pointerId === event.pointerId) panRef.current = null;
+    if (interactionRef.current?.pointerId === event.pointerId) {
+      cancelActiveInteraction();
+    }
+  };
+
+  const startMove = (
+    event: PointerEvent<SVGGElement>,
+    annotation: Annotation,
+  ) => {
+    if (
+      mode !== "select" ||
+      event.button !== 0 ||
+      spacePressedRef.current ||
+      interactionRef.current !== null
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    interactionRef.current = {
+      type: "move",
+      pointerId: event.pointerId,
+      id: annotation.id,
+      startImage: viewportToImage(localPoint(event), transform),
+      startBBox: annotation.bbox,
+    };
+    interactionMovedRef.current = false;
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    dispatch({ type: "BEGIN_TRANSACTION" });
+  };
+
+  const startResize = (
+    event: PointerEvent<SVGRectElement>,
+    annotation: Annotation,
+    handle: ResizeHandle,
+  ) => {
+    if (
+      mode !== "select" ||
+      event.button !== 0 ||
+      spacePressedRef.current ||
+      interactionRef.current !== null
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    interactionRef.current = {
+      type: "resize",
+      pointerId: event.pointerId,
+      id: annotation.id,
+      handle,
+      startBBox: annotation.bbox,
+    };
+    interactionMovedRef.current = false;
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    dispatch({ type: "BEGIN_TRANSACTION" });
   };
 
   return (
@@ -347,8 +611,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={stopPan}
-      onPointerCancel={stopPan}
+      onPointerUp={stopInteraction}
+      onPointerCancel={stopInteraction}
       onLostPointerCapture={onLostPointerCapture}
       onClickCapture={(event) => {
         if (!suppressClickRef.current) return;
@@ -388,8 +652,27 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
               event.stopPropagation();
               dispatch({ type: "SELECT", id: annotation.id });
             }}
+            onPointerDown={(event) => startMove(event, annotation)}
+            onResizePointerDown={(event, handle) =>
+              startResize(event, annotation, handle)
+            }
           />
         ))}
+        {draftBBox ? (
+          <rect
+            data-testid="draft-box"
+            x={draftBBox.x1}
+            y={draftBBox.y1}
+            width={draftBBox.x2 - draftBBox.x1}
+            height={draftBBox.y2 - draftBBox.y1}
+            fill="none"
+            stroke="#facc15"
+            strokeWidth={2}
+            strokeDasharray="6 4"
+            vectorEffect="non-scaling-stroke"
+            pointerEvents="none"
+          />
+        ) : null}
       </g>
     </svg>
   );

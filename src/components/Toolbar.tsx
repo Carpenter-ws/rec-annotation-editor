@@ -9,6 +9,9 @@ export interface ToolbarProps {
   onZoomOut: () => void;
   onZoomIn: () => void;
   onFit: () => void;
+  mode: "select" | "add";
+  addBoxDisabled: boolean;
+  onAddBox: () => void;
 }
 
 export function Toolbar({
@@ -20,6 +23,9 @@ export function Toolbar({
   onZoomOut,
   onZoomIn,
   onFit,
+  mode,
+  addBoxDisabled,
+  onAddBox,
 }: ToolbarProps): JSX.Element {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
@@ -78,6 +84,14 @@ export function Toolbar({
           Fit
         </button>
       </div>
+      <button
+        type="button"
+        aria-pressed={mode === "add"}
+        disabled={addBoxDisabled}
+        onClick={onAddBox}
+      >
+        Add Box
+      </button>
     </header>
   );
 }
