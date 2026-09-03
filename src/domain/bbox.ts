@@ -38,9 +38,30 @@ function resizeAxis(
   moveHigh: boolean,
   maximum: number,
 ): [number, number] {
-  if (moveLow) return [clamp(point, 0, high - MIN_BOX_SIZE), high];
-  if (moveHigh) return [low, clamp(point, low + MIN_BOX_SIZE, maximum)];
-  return [low, high];
+  let resized: [number, number];
+
+  if (moveLow) resized = [clamp(point, 0, high - MIN_BOX_SIZE), high];
+  else if (moveHigh)
+    resized = [low, clamp(point, low + MIN_BOX_SIZE, maximum)];
+  else resized = [low, high];
+
+  if (high - low >= MIN_BOX_SIZE) return resized;
+
+  const [nextLow, nextHigh] = resized;
+  const size = nextHigh - nextLow;
+
+  if (size >= MIN_BOX_SIZE && nextLow < 0) {
+    return [0, size];
+  }
+  if (size >= MIN_BOX_SIZE && nextHigh > maximum) {
+    return [maximum - size, maximum];
+  }
+  if (size >= MIN_BOX_SIZE) return resized;
+  if (nextHigh <= MIN_BOX_SIZE) return [0, MIN_BOX_SIZE];
+  if (nextLow >= maximum - MIN_BOX_SIZE) {
+    return [maximum - MIN_BOX_SIZE, maximum];
+  }
+  return [nextLow, nextLow + MIN_BOX_SIZE];
 }
 
 export function resizeBBox(

@@ -44,6 +44,62 @@ describe("bbox geometry", () => {
     );
   });
 
+  it.each([
+    [
+      "nw",
+      { x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5 },
+      { x: 0.2, y: 0.2 },
+      { x1: 0, y1: 0, x2: 1, y2: 1 },
+    ],
+    [
+      "n",
+      { x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5 },
+      { x: 0.2, y: 0.2 },
+      { x1: 0, y1: 0, x2: 1, y2: 1 },
+    ],
+    [
+      "ne",
+      { x1: 119.5, y1: 0.1, x2: 120, y2: 0.5 },
+      { x: 119.8, y: 0.2 },
+      { x1: 119, y1: 0, x2: 120, y2: 1 },
+    ],
+    [
+      "e",
+      { x1: 119.5, y1: 0.1, x2: 120, y2: 0.5 },
+      { x: 119.8, y: 0.2 },
+      { x1: 119, y1: 0, x2: 120, y2: 1 },
+    ],
+    [
+      "se",
+      { x1: 119.5, y1: 109.5, x2: 120, y2: 110 },
+      { x: 119.8, y: 109.8 },
+      { x1: 119, y1: 109, x2: 120, y2: 110 },
+    ],
+    [
+      "s",
+      { x1: 119.5, y1: 109.5, x2: 120, y2: 110 },
+      { x: 119.8, y: 109.8 },
+      { x1: 119, y1: 109, x2: 120, y2: 110 },
+    ],
+    [
+      "sw",
+      { x1: 0.1, y1: 109.5, x2: 0.5, y2: 110 },
+      { x: 0.2, y: 109.8 },
+      { x1: 0, y1: 109, x2: 1, y2: 110 },
+    ],
+    [
+      "w",
+      { x1: 0.1, y1: 109.5, x2: 0.5, y2: 110 },
+      { x: 0.2, y: 109.8 },
+      { x1: 0, y1: 109, x2: 1, y2: 110 },
+    ],
+  ] as const)(
+    "repairs subpixel axes within bounds when resizing handle %s",
+    (handle, source, point, expected) => {
+      expect(resizeBBox(source, handle, point, bounds)).toEqual(expected);
+    },
+  );
+
   it("normalizes two points before clamping them to image bounds", () => {
     expect(
       bboxFromPoints({ x: 130, y: 90 }, { x: -5, y: 20 }, bounds),
