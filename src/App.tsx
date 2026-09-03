@@ -7,6 +7,7 @@ import {
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
+import { Viewport, type ViewportHandle } from "./components/Viewport";
 import { clampBBox } from "./domain/bbox";
 import { parseAnnotationText } from "./domain/parser";
 import type { Annotation, ImageBounds, ImageInfo } from "./domain/types";
@@ -87,6 +88,8 @@ function EditorWorkspace(): JSX.Element {
   const [dragActive, setDragActive] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [errorReport, setErrorReport] = useState<ErrorReport | null>(null);
+  const [zoomScale, setZoomScale] = useState(1);
+  const viewportRef = useRef<ViewportHandle>(null);
   const stateRef = useRef(state);
   const importGenerationRef = useRef(0);
   const dragDepthRef = useRef(0);
@@ -245,8 +248,12 @@ function EditorWorkspace(): JSX.Element {
       <Toolbar
         imageName={state.image?.name ?? null}
         labelFileName={state.labelFileName}
+        scale={zoomScale}
         onOpenImage={(file) => void importFiles({ image: file })}
         onOpenLabels={(file) => void importFiles({ labels: file })}
+        onZoomOut={() => viewportRef.current?.zoomBy(1 / 1.2)}
+        onZoomIn={() => viewportRef.current?.zoomBy(1.2)}
+        onFit={() => viewportRef.current?.fit()}
       />
       <main className="editor-layout">
         <section
@@ -268,7 +275,14 @@ function EditorWorkspace(): JSX.Element {
           onDrop={handleDrop}
         >
           {state.image ? (
-            <img src={state.image.url} alt={state.image.name} />
+            <Viewport
+              ref={viewportRef}
+              image={state.image}
+              annotations={state.annotations}
+              selectedId={state.selectedId}
+              dispatch={dispatch}
+              onZoomChange={setZoomScale}
+            />
           ) : (
             <p>
               {dragActive
@@ -287,6 +301,7 @@ function EditorWorkspace(): JSX.Element {
         image={state.image}
         annotationCount={state.annotations.length}
         notice={notice}
+        scale={zoomScale}
       />
       <ErrorDialog
         title={errorReport?.title ?? "Import error"}

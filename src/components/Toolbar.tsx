@@ -3,15 +3,23 @@ import { useRef, type ChangeEvent, type JSX } from "react";
 export interface ToolbarProps {
   imageName: string | null;
   labelFileName: string | null;
+  scale: number;
   onOpenImage: (file: File) => void;
   onOpenLabels: (file: File) => void;
+  onZoomOut: () => void;
+  onZoomIn: () => void;
+  onFit: () => void;
 }
 
 export function Toolbar({
   imageName,
   labelFileName,
+  scale,
   onOpenImage,
   onOpenLabels,
+  onZoomOut,
+  onZoomIn,
+  onFit,
 }: ToolbarProps): JSX.Element {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
@@ -55,6 +63,20 @@ export function Toolbar({
       <div className="toolbar-file-names" aria-label="Open files">
         <span>{imageName ?? "No image"}</span>
         <span>{labelFileName ?? "No labels"}</span>
+      </div>
+      <div className="zoom-controls" aria-label="Zoom controls">
+        <button type="button" aria-label="Zoom out" onClick={onZoomOut}>
+          −
+        </button>
+        <output role="presentation" data-testid="zoom-percent">
+          {Math.round(scale * 100)}%
+        </output>
+        <button type="button" aria-label="Zoom in" onClick={onZoomIn}>
+          +
+        </button>
+        <button type="button" onClick={onFit}>
+          Fit
+        </button>
       </div>
     </header>
   );

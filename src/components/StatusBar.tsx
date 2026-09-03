@@ -5,12 +5,14 @@ export interface StatusBarProps {
   image: ImageInfo | null;
   annotationCount: number;
   notice: string | null;
+  scale: number;
 }
 
 export function StatusBar({
   image,
   annotationCount,
   notice,
+  scale,
 }: StatusBarProps): JSX.Element {
   return (
     <footer className="status-bar" role="status">
@@ -20,6 +22,7 @@ export function StatusBar({
       <span>
         {annotationCount} {annotationCount === 1 ? "annotation" : "annotations"}
       </span>
+      {image ? <span>Zoom {Math.round(scale * 100)}%</span> : null}
       {notice ? <span>{notice}</span> : null}
     </footer>
   );

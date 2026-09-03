@@ -81,6 +81,39 @@ function mockImageEnvironment(outcomes: readonly (DecodedImage | "error")[]) {
   return { createObjectURL, revokeObjectURL };
 }
 
+function mockViewportEnvironment(width = 1000, height = 700) {
+  const rect: DOMRect = {
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    right: width,
+    bottom: height,
+    width,
+    height,
+    toJSON: () => ({}),
+  };
+  vi.spyOn(SVGSVGElement.prototype, "getBoundingClientRect").mockReturnValue(
+    rect,
+  );
+  vi.stubGlobal(
+    "ResizeObserver",
+    class ResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe(target: Element) {
+        this.callback(
+          [{ target, contentRect: rect } as ResizeObserverEntry],
+          this,
+        );
+      }
+
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+}
+
 interface DeferredImageController {
   succeed: (width: number, height: number) => void;
   fail: () => void;
@@ -154,6 +187,76 @@ it("renders the provider-backed REC editor shell and semantic regions", () => {
     screen.getByRole("complementary", { name: "Annotations" }),
   ).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+});
+
+it("wires centered zoom controls to the viewport and status bar", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 1920, height: 1080 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+
+  expect(await screen.findByText("1920 × 1080")).toBeVisible();
+  const zoomPercent = screen.getByTestId("zoom-percent");
+  expect(zoomPercent).toHaveTextContent("52%");
+  expect(screen.getByRole("status")).toHaveTextContent("Zoom 52%");
+
+  await user.click(screen.getByRole("button", { name: "Zoom in" }));
+  expect(zoomPercent).toHaveTextContent("63%");
+  const imageSpace = screen.getByTestId("image-space");
+  expect(Number(imageSpace.getAttribute("data-scale"))).toBeCloseTo(0.625, 10);
+  expect(Number(imageSpace.getAttribute("data-offset-x"))).toBeCloseTo(
+    -100,
+    10,
+  );
+  expect(Number(imageSpace.getAttribute("data-offset-y"))).toBeCloseTo(12.5, 10);
+
+  await user.click(screen.getByRole("button", { name: "Zoom out" }));
+  expect(zoomPercent).toHaveTextContent("52%");
+
+  await user.click(screen.getByRole("button", { name: "Zoom in" }));
+  await user.click(screen.getByRole("button", { name: "Fit" }));
+  expect(zoomPercent).toHaveTextContent("52%");
+  expect(imageSpace).toHaveAttribute(
+    "transform",
+    "translate(0 68.75) scale(0.5208333333333334)",
+  );
+});
+
+it("fits a replacement image even after manual zoom", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([
+    { width: 1920, height: 1080 },
+    { width: 400, height: 400 },
+  ]);
+  mockViewportEnvironment();
+  render(<App />);
+  const imageInput = screen.getByLabelText("Open image");
+
+  await user.upload(
+    imageInput,
+    new File(["first"], "first.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("1920 × 1080")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Zoom in" }));
+  expect(screen.getByTestId("zoom-percent")).toHaveTextContent("63%");
+
+  await user.upload(
+    imageInput,
+    new File(["second"], "second.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("400 × 400")).toBeVisible();
+  await waitFor(() => {
+    expect(screen.getByTestId("zoom-percent")).toHaveTextContent("175%");
+  });
+  expect(screen.getByTestId("image-space")).toHaveAttribute(
+    "transform",
+    "translate(150 0) scale(1.75)",
+  );
 });
 
 it("keeps drag guidance across descendants and clears it on exit or drop", () => {
