@@ -468,6 +468,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         { width: image.width, height: image.height },
       );
       interactionMovedRef.current =
+        interactionMovedRef.current ||
         bbox.x1 !== interaction.startBBox.x1 ||
         bbox.y1 !== interaction.startBBox.y1 ||
         bbox.x2 !== interaction.startBBox.x2 ||
@@ -484,6 +485,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       const currentImage = viewportToImage(localPoint(event), transform);
       interactionRef.current = { ...interaction, currentImage };
       interactionMovedRef.current =
+        interactionMovedRef.current ||
         currentImage.x !== interaction.startImage.x ||
         currentImage.y !== interaction.startImage.y;
       setDraftBBox(
@@ -503,6 +505,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     if (event.type === "pointerup" && interaction.type === "draw") {
       const endImage = viewportToImage(localPoint(event), transform);
       interactionMovedRef.current =
+        interactionMovedRef.current ||
         endImage.x !== interaction.startImage.x ||
         endImage.y !== interaction.startImage.y;
       const bbox = bboxFromPoints(interaction.startImage, endImage, {

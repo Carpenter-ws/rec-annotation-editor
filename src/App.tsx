@@ -133,6 +133,11 @@ function EditorWorkspace(): JSX.Element {
     files: ImportFiles,
     rejected: readonly File[] = [],
   ): Promise<void> => {
+    if (files.image || files.labels) {
+      setDraftBBox(null);
+      pendingCenterIdRef.current = null;
+      dispatch({ type: "SET_MODE", mode: "select" });
+    }
     const generation = ++importGenerationRef.current;
     const isCurrent = () =>
       mountedRef.current && importGenerationRef.current === generation;

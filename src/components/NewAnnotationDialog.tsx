@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 
 export interface NewAnnotationDialogProps {
   onAdd: (label: string) => void;
@@ -12,17 +12,22 @@ export function NewAnnotationDialog({
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
   return (
     <div
       role="dialog"
       aria-labelledby="new-annotation-title"
       aria-modal="true"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        event.stopPropagation();
-        onCancel();
-      }}
     >
       <h2 id="new-annotation-title">New annotation</h2>
       <label>

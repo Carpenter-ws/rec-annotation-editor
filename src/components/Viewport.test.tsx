@@ -419,6 +419,56 @@ it.each([
   },
 );
 
+it("keeps resize click suppression after dragging away and back", () => {
+  renderViewport({
+    annotations: [
+      {
+        id: "ann_001",
+        bbox: { x1: 100, y1: 100, x2: 200, y2: 200 },
+        label: "person",
+        reservedField: "0",
+      },
+    ],
+    selectedId: "ann_001",
+    initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },
+  });
+  const canvas = screen.getByLabelText("Annotation canvas");
+  const handle = screen.getByTestId("handle-e");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+
+  fireEvent.pointerDown(handle, {
+    pointerId: 18,
+    clientX: 120,
+    clientY: 105,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 18,
+    clientX: 130,
+    clientY: 105,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 18,
+    clientX: 120,
+    clientY: 105,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 18,
+    clientX: 120,
+    clientY: 105,
+  });
+  fireEvent.click(handle);
+
+  expect(dispatch).toHaveBeenCalledWith({ type: "COMMIT_TRANSACTION" });
+  expect(
+    dispatch.mock.calls.some(([action]) => action.type === "SELECT"),
+  ).toBe(false);
+});
+
 it("cancels a moved preview on pointer cancel without committing", () => {
   const annotation: Annotation = {
     id: "ann_001",
@@ -670,6 +720,48 @@ it("suppresses a draw click when the final coordinates arrive on pointer up", ()
   fireEvent.click(canvas);
 
   expect(onDraftBox).toHaveBeenCalledOnce();
+  expect(dispatch).not.toHaveBeenCalled();
+});
+
+it("keeps draw click suppression after dragging away and back", () => {
+  const onDraftBox = vi.fn();
+  renderViewport({
+    mode: "add",
+    onDraftBox,
+    selectedId: "ann_001",
+    initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },
+  });
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+
+  fireEvent.pointerDown(canvas, {
+    pointerId: 19,
+    clientX: 70,
+    clientY: 80,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 19,
+    clientX: 170,
+    clientY: 180,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 19,
+    clientX: 70,
+    clientY: 80,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 19,
+    clientX: 70,
+    clientY: 80,
+  });
+  fireEvent.click(canvas);
+
+  expect(onDraftBox).not.toHaveBeenCalled();
   expect(dispatch).not.toHaveBeenCalled();
 });
 

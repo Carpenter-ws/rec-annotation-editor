@@ -517,54 +517,162 @@ it("discards a new annotation draft with Cancel", async () => {
   ).toBe(false);
 });
 
-it("discards a new annotation draft with Escape", async () => {
-  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
-  const user = userEvent.setup();
-  mockImageEnvironment([{ width: 400, height: 300 }]);
-  mockViewportEnvironment();
-  mockPointerEnvironment();
-  render(<App />);
+it.each(["dialog", "background"] as const)(
+  "discards a new annotation draft once with Escape from %s focus",
+  async (focusLocation) => {
+    const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+    const user = userEvent.setup();
+    mockImageEnvironment([{ width: 400, height: 300 }]);
+    mockViewportEnvironment();
+    mockPointerEnvironment();
+    render(<App />);
 
-  await user.upload(
-    screen.getByLabelText("Open image"),
-    new File(["pixels"], "scene.png", { type: "image/png" }),
-  );
-  expect(await screen.findByText("400 × 300")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Add Box" }));
-  const canvas = screen.getByLabelText("Annotation canvas");
-  Object.assign(canvas, {
-    setPointerCapture: vi.fn(),
-    releasePointerCapture: vi.fn(),
-    hasPointerCapture: vi.fn(() => true),
-  });
-  fireEvent.pointerDown(canvas, {
-    pointerId: 5,
-    clientX: 100,
-    clientY: 100,
-    button: 0,
-  });
-  fireEvent.pointerMove(canvas, {
-    pointerId: 5,
-    clientX: 300,
-    clientY: 300,
-  });
-  fireEvent.pointerUp(canvas, {
-    pointerId: 5,
-    clientX: 300,
-    clientY: 300,
-  });
-  const expression = await screen.findByRole("textbox", { name: "Expression" });
-  await user.type(expression, "temporary label");
-  reducer.mockClear();
+    await user.upload(
+      screen.getByLabelText("Open image"),
+      new File(["pixels"], "scene.png", { type: "image/png" }),
+    );
+    expect(await screen.findByText("400 × 300")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Add Box" }));
+    const canvas = screen.getByLabelText("Annotation canvas");
+    Object.assign(canvas, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn(() => true),
+    });
+    fireEvent.pointerDown(canvas, {
+      pointerId: 5,
+      clientX: 100,
+      clientY: 100,
+      button: 0,
+    });
+    fireEvent.pointerMove(canvas, {
+      pointerId: 5,
+      clientX: 300,
+      clientY: 300,
+    });
+    fireEvent.pointerUp(canvas, {
+      pointerId: 5,
+      clientX: 300,
+      clientY: 300,
+    });
+    const expression = await screen.findByRole("textbox", {
+      name: "Expression",
+    });
+    await user.type(expression, "temporary label");
+    if (focusLocation === "background") {
+      screen.getByRole("button", { name: "Zoom in" }).focus();
+      expect(screen.getByRole("button", { name: "Zoom in" })).toHaveFocus();
+    } else {
+      expect(expression).toHaveFocus();
+    }
+    reducer.mockClear();
 
-  await user.keyboard("{Escape}");
+    await user.keyboard("{Escape}");
 
-  expect(screen.queryByRole("dialog", { name: "New annotation" })).not.toBeInTheDocument();
-  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
-  expect(
-    reducer.mock.calls.some(([, action]) => action.type === "ADD_ANNOTATION"),
-  ).toBe(false);
-});
+    expect(
+      screen.queryByRole("dialog", { name: "New annotation" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+    expect(
+      reducer.mock.calls.some(([, action]) => action.type === "ADD_ANNOTATION"),
+    ).toBe(false);
+    expect(
+      reducer.mock.calls.filter(([, action]) => action.type === "SET_MODE"),
+    ).toEqual([[expect.anything(), { type: "SET_MODE", mode: "select" }]]);
+  },
+);
+
+it.each(["image", "labels"] as const)(
+  "cancels a pending annotation draft immediately when an import begins for %s",
+  async (kind) => {
+    const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+    const user = userEvent.setup();
+    const { images, revokeObjectURL } = mockDeferredImageEnvironment();
+    const pendingLabels = deferredTextFile("replacement.txt");
+    mockViewportEnvironment();
+    mockPointerEnvironment();
+    render(<App />);
+
+    const imageInput = screen.getByLabelText("Open image");
+    await user.upload(
+      imageInput,
+      new File(["first"], "first.png", { type: "image/png" }),
+    );
+    await settleDeferred(() => images[0]!.succeed(400, 300));
+    expect(await screen.findByText("400 × 300")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Add Box" }));
+    const canvas = screen.getByLabelText("Annotation canvas");
+    Object.assign(canvas, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn(() => true),
+    });
+    fireEvent.pointerDown(canvas, {
+      pointerId: 17,
+      clientX: 100,
+      clientY: 100,
+      button: 0,
+    });
+    fireEvent.pointerMove(canvas, {
+      pointerId: 17,
+      clientX: 300,
+      clientY: 300,
+    });
+    fireEvent.pointerUp(canvas, {
+      pointerId: 17,
+      clientX: 300,
+      clientY: 300,
+    });
+    const expression = await screen.findByRole("textbox", {
+      name: "Expression",
+    });
+    await user.type(expression, "stale draft");
+    reducer.mockClear();
+
+    if (kind === "image") {
+      await user.upload(
+        imageInput,
+        new File(["second"], "second.png", { type: "image/png" }),
+      );
+      expect(images).toHaveLength(2);
+    } else {
+      await user.upload(screen.getByLabelText("Open labels"), pendingLabels.file);
+    }
+
+    expect(
+      screen.queryByRole("dialog", { name: "New annotation" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Box" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(
+      reducer.mock.calls.filter(([, action]) => action.type === "SET_MODE"),
+    ).toEqual([[expect.anything(), { type: "SET_MODE", mode: "select" }]]);
+    expect(
+      reducer.mock.calls.some(([, action]) => action.type === "ADD_ANNOTATION"),
+    ).toBe(false);
+
+    if (kind === "image") {
+      await settleDeferred(() => images[1]!.succeed(500, 350));
+      expect(await screen.findByText("500 × 350")).toBeVisible();
+      expect(revokeObjectURL).toHaveBeenCalledOnce();
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:image-1");
+    } else {
+      await settleDeferred(() =>
+        pendingLabels.resolve("10 10 20 20 imported label 0"),
+      );
+      expect(await screen.findByText("imported label")).toBeVisible();
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+    }
+
+    expect(
+      reducer.mock.calls.some(([, action]) => action.type === "ADD_ANNOTATION"),
+    ).toBe(false);
+  },
+);
 
 it("wires centered zoom controls to the viewport and status bar", async () => {
   const user = userEvent.setup();
