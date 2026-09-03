@@ -1,10 +1,19 @@
-import { useEffect, useRef, useState, type DragEvent, type JSX } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type JSX,
+} from "react";
 import {
   loadImageFile,
   partitionDroppedFiles,
   readTextFile,
 } from "./app/fileIO";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
+import { AnnotationPanel } from "./components/AnnotationPanel";
 import { NewAnnotationDialog } from "./components/NewAnnotationDialog";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
@@ -103,6 +112,16 @@ function EditorWorkspace(): JSX.Element {
   const acceptedImageUrlRef = useRef<string | null>(null);
   const pendingCenterIdRef = useRef<string | null>(null);
   stateRef.current = state;
+  const imageBounds = useMemo<ImageBounds | null>(
+    () =>
+      state.image
+        ? { width: state.image.width, height: state.image.height }
+        : null,
+    [state.image?.height, state.image?.width],
+  );
+  const locateAnnotation = useCallback((id: string) => {
+    viewportRef.current?.centerAnnotation(id);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -340,10 +359,17 @@ function EditorWorkspace(): JSX.Element {
             </p>
           )}
         </section>
-        <aside aria-label="Annotations">
-          {state.annotations.map((annotation) => (
-            <p key={annotation.id}>{annotation.label}</p>
-          ))}
+        <aside
+          aria-label="Annotations"
+          aria-hidden={draftBBox !== null ? true : undefined}
+        >
+          <AnnotationPanel
+            annotations={state.annotations}
+            selectedId={state.selectedId}
+            bounds={imageBounds}
+            dispatch={dispatch}
+            onLocate={locateAnnotation}
+          />
         </aside>
       </main>
       {draftBBox ? (

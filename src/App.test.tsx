@@ -779,6 +779,112 @@ it("loads duplicate free-text annotations and shows their count", async () => {
   expect(screen.getByText("the person beside the car")).toBeVisible();
 });
 
+it("lists label-only imports but disables bbox editing without image bounds", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0"),
+  );
+
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  expect(expression).toHaveValue("person");
+  expect(expression).toBeEnabled();
+  for (const name of ["X1", "Y1", "X2", "Y2"]) {
+    expect(screen.getByRole("textbox", { name })).toBeDisabled();
+  }
+  expect(screen.queryByLabelText("Annotation canvas")).not.toBeInTheDocument();
+});
+
+it("centers the viewport on the exact annotation clicked in the panel", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0"),
+  );
+  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  const imageSpace = screen.getByTestId("image-space");
+  const startingOffsetX = Number(imageSpace.getAttribute("data-offset-x"));
+
+  await user.click(screen.getByText("Annotation 1"));
+
+  await waitFor(() => {
+    expect(Number(imageSpace.getAttribute("data-offset-x"))).not.toBe(
+      startingOffsetX,
+    );
+    expect(Number(imageSpace.getAttribute("data-offset-x"))).toBeCloseTo(
+      406.6666666667,
+      8,
+    );
+    expect(Number(imageSpace.getAttribute("data-offset-y"))).toBeCloseTo(
+      221.6666666667,
+      8,
+    );
+  });
+});
+
+it("highlights and scrolls the exact card selected from a duplicate-label bbox", async () => {
+  const user = userEvent.setup();
+  const scrollIntoView = vi.fn();
+  const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollIntoView",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView,
+  });
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+
+  try {
+    render(<App />);
+    await user.upload(
+      screen.getByLabelText("Open image"),
+      new File(["pixels"], "scene.png", { type: "image/png" }),
+    );
+    await user.upload(
+      screen.getByLabelText("Open labels"),
+      textFile("10 20 70 90 person 0\n100 110 180 200 person 0"),
+    );
+    expect(await screen.findAllByDisplayValue("person")).toHaveLength(2);
+    const cards = [
+      ...screen
+        .getByRole("complementary", { name: "Annotations" })
+        .querySelectorAll<HTMLElement>("[data-annotation-id]"),
+    ];
+
+    fireEvent.click(screen.getByTestId("bbox-ann_002"));
+
+    expect(cards[0]).not.toHaveAttribute("aria-current");
+    expect(cards[1]).toHaveAttribute("aria-current", "true");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrollIntoView.mock.contexts[0]).toBe(cards[1]);
+  } finally {
+    if (originalScrollIntoView) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollIntoView",
+        originalScrollIntoView,
+      );
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+    }
+  }
+});
+
 it("reloads identical labels to establish a fresh document baseline", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
