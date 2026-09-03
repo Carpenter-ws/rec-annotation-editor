@@ -192,6 +192,7 @@ export const AnnotationCard = memo(function AnnotationCard({
         Expression
         <input
           type="text"
+          data-expression-transaction-owner="true"
           value={expression}
           onFocus={() => {
             onSelect(annotation.id);

@@ -1003,6 +1003,107 @@ it("separates a focused expression edit, canvas move, and later expression edit 
   ]);
 });
 
+it("preserves a focused numeric draft through a canvas move and commits it afterward", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment(400, 300);
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0"),
+  );
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  await user.click(x1);
+  fireEvent.change(x1, { target: { value: "15." } });
+  reducer.mockClear();
+
+  fireEvent.pointerDown(screen.getByTestId("bbox-ann_001"), {
+    pointerId: 32,
+    clientX: 20,
+    clientY: 30,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, {
+    pointerId: 32,
+    clientX: 30,
+    clientY: 40,
+  });
+  fireEvent.pointerUp(canvas, {
+    pointerId: 32,
+    clientX: 30,
+    clientY: 40,
+  });
+
+  expect(x1).toHaveFocus();
+  expect(x1).toHaveValue("15.");
+  expect(screen.getByRole("textbox", { name: "Y1" })).toHaveValue("30");
+  expect(screen.getByRole("textbox", { name: "X2" })).toHaveValue("80");
+  expect(screen.getByRole("textbox", { name: "Y2" })).toHaveValue("100");
+
+  fireEvent.blur(x1);
+
+  const editActions = reducer.mock.calls
+    .map(([, action]) => action)
+    .filter(({ type }) =>
+      [
+        "BEGIN_TRANSACTION",
+        "PREVIEW_PATCH",
+        "COMMIT_TRANSACTION",
+        "UPDATE_ANNOTATION",
+      ].includes(type),
+    )
+    .map((action) => action.type);
+  expect(editActions).toEqual([
+    "BEGIN_TRANSACTION",
+    "PREVIEW_PATCH",
+    "COMMIT_TRANSACTION",
+    "UPDATE_ANNOTATION",
+  ]);
+
+  const finalState = reducer.mock.results.at(-1)?.value;
+  expect(finalState?.transactionBase).toBeNull();
+  expect(finalState?.annotations).toEqual([
+    {
+      id: "ann_001",
+      bbox: { x1: 15, y1: 30, x2: 80, y2: 100 },
+      label: "person",
+      reservedField: "0",
+    },
+  ]);
+  expect(finalState?.past).toEqual([
+    [
+      {
+        id: "ann_001",
+        bbox: { x1: 10, y1: 20, x2: 70, y2: 90 },
+        label: "person",
+        reservedField: "0",
+      },
+    ],
+    [
+      {
+        id: "ann_001",
+        bbox: { x1: 20, y1: 30, x2: 80, y2: 100 },
+        label: "person",
+        reservedField: "0",
+      },
+    ],
+  ]);
+  expect(x1).toHaveValue("15");
+});
+
 it("reloads identical labels to establish a fresh document baseline", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();

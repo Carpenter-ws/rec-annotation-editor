@@ -60,13 +60,11 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   );
 }
 
-function blurActiveHTMLElement(svg: SVGSVGElement | null): void {
+function blurActiveExpressionTransactionOwner(): void {
   const activeElement = document.activeElement;
   if (
-    activeElement === null ||
-    activeElement === document.body ||
-    activeElement === svg ||
-    !(activeElement instanceof HTMLElement)
+    !(activeElement instanceof HTMLElement) ||
+    !activeElement.hasAttribute("data-expression-transaction-owner")
   ) {
     return;
   }
@@ -580,7 +578,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
-    blurActiveHTMLElement(svgRef.current);
+    blurActiveExpressionTransactionOwner();
     interactionRef.current = {
       type: "move",
       pointerId: event.pointerId,
@@ -608,7 +606,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
-    blurActiveHTMLElement(svgRef.current);
+    blurActiveExpressionTransactionOwner();
     interactionRef.current = {
       type: "resize",
       pointerId: event.pointerId,
