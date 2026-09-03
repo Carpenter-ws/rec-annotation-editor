@@ -145,4 +145,35 @@ describe("loadImageFile", () => {
     expect(revokeObjectURL).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:broken");
   });
+
+  it.each([
+    [0, 1080],
+    [1920, 0],
+    [Number.POSITIVE_INFINITY, 1080],
+    [1920, Number.NaN],
+  ])(
+    "rejects invalid decoded dimensions %s × %s and revokes once",
+    async (width, height) => {
+      const { revokeObjectURL } = stubObjectURL("blob:invalid-dimensions");
+      class InvalidDimensionsImage {
+        naturalWidth = width;
+        naturalHeight = height;
+        onload: null | (() => void) = null;
+        onerror: null | (() => void) = null;
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      }
+      vi.stubGlobal("Image", InvalidDimensionsImage);
+      const file = new File(["pixels"], "invalid.png", {
+        type: "image/png",
+      });
+
+      await expect(loadImageFile(file)).rejects.toThrow(
+        'Could not decode image "invalid.png".',
+      );
+      expect(revokeObjectURL).toHaveBeenCalledOnce();
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:invalid-dimensions");
+    },
+  );
 });

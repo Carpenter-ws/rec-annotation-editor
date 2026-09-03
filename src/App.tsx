@@ -1,4 +1,4 @@
-import { useState, type DragEvent, type JSX } from "react";
+import { useEffect, useRef, useState, type DragEvent, type JSX } from "react";
 import {
   loadImageFile,
   partitionDroppedFiles,
@@ -87,31 +87,53 @@ function EditorWorkspace(): JSX.Element {
   const [dragActive, setDragActive] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [errorReport, setErrorReport] = useState<ErrorReport | null>(null);
+  const stateRef = useRef(state);
+  const importGenerationRef = useRef(0);
+  const dragDepthRef = useRef(0);
+  const mountedRef = useRef(true);
+  const acceptedImageUrlRef = useRef<string | null>(null);
+  stateRef.current = state;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      importGenerationRef.current += 1;
+      const acceptedUrl = acceptedImageUrlRef.current;
+      acceptedImageUrlRef.current = null;
+      if (acceptedUrl) URL.revokeObjectURL(acceptedUrl);
+    };
+  }, []);
 
   const importFiles = async (
     files: ImportFiles,
     rejected: readonly File[] = [],
   ): Promise<void> => {
+    const generation = ++importGenerationRef.current;
+    const isCurrent = () =>
+      mountedRef.current && importGenerationRef.current === generation;
     setErrorReport(null);
     setNotice(null);
 
     const rejectedIssues = rejected.map(
       (file) => `Rejected "${file.name}": unsupported or extra file.`,
     );
-    let annotations = state.annotations;
-    let labelFileName = state.labelFileName;
+    let importedAnnotations: Annotation[] | undefined;
 
     if (files.labels) {
       let text: string;
       try {
         text = await readTextFile(files.labels);
       } catch (error) {
+        if (!isCurrent()) return;
         setErrorReport({
           title: "Could not import labels",
           issues: [errorMessage(error), ...rejectedIssues],
         });
         return;
       }
+
+      if (!isCurrent()) return;
 
       const parsed = parseAnnotationText(text);
       if (parsed.issues.length > 0) {
@@ -122,18 +144,16 @@ function EditorWorkspace(): JSX.Element {
         return;
       }
 
-      annotations = parsed.annotations;
-      labelFileName = files.labels.name;
+      importedAnnotations = parsed.annotations;
     }
 
-    let image: ImageInfo | null = state.image;
     let loadedImage: ImageInfo | null = null;
 
     if (files.image) {
       try {
         loadedImage = await loadImageFile(files.image);
-        image = loadedImage;
       } catch (error) {
+        if (!isCurrent()) return;
         setErrorReport({
           title: "Could not import image",
           issues: [errorMessage(error), ...rejectedIssues],
@@ -141,6 +161,16 @@ function EditorWorkspace(): JSX.Element {
         return;
       }
     }
+
+    if (!isCurrent()) {
+      if (loadedImage) URL.revokeObjectURL(loadedImage.url);
+      return;
+    }
+
+    const latestState = stateRef.current;
+    const annotations = importedAnnotations ?? latestState.annotations;
+    const labelFileName = files.labels?.name ?? latestState.labelFileName;
+    const image = loadedImage ?? latestState.image;
 
     let clamped: ClampedAnnotations = {
       annotations: [...annotations],
@@ -167,23 +197,26 @@ function EditorWorkspace(): JSX.Element {
     }
 
     if (loadedImage) {
-      if (state.image && state.image.url !== loadedImage.url) {
-        URL.revokeObjectURL(state.image.url);
+      const previousUrl = acceptedImageUrlRef.current;
+      acceptedImageUrlRef.current = loadedImage.url;
+      if (previousUrl && previousUrl !== loadedImage.url) {
+        URL.revokeObjectURL(previousUrl);
       }
-      dispatch({ type: "SET_IMAGE", image: loadedImage });
     }
 
     const annotationsChanged = !sameAnnotations(
       clamped.annotations,
-      state.annotations,
+      latestState.annotations,
     );
-    if (files.labels || annotationsChanged) {
-      // A successful label import establishes a fresh baseline and clears stale
-      // history or selection even when its name and contents are unchanged.
+    const annotationBaseline =
+      files.labels || annotationsChanged
+        ? { annotations: clamped.annotations, fileName: labelFileName }
+        : undefined;
+    if (loadedImage || annotationBaseline) {
       dispatch({
-        type: "LOAD_ANNOTATIONS",
-        annotations: clamped.annotations,
-        fileName: labelFileName,
+        type: "COMMIT_IMPORT",
+        ...(loadedImage ? { image: loadedImage } : {}),
+        ...(annotationBaseline ? { annotationBaseline } : {}),
       });
     }
 
@@ -198,6 +231,7 @@ function EditorWorkspace(): JSX.Element {
 
   const handleDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
+    dragDepthRef.current = 0;
     setDragActive(false);
     const dropped = partitionDroppedFiles(Array.from(event.dataTransfer.files));
     void importFiles(
@@ -220,13 +254,17 @@ function EditorWorkspace(): JSX.Element {
           aria-label="Image workspace"
           onDragEnter={(event) => {
             event.preventDefault();
+            dragDepthRef.current += 1;
             setDragActive(true);
           }}
           onDragOver={(event) => {
             event.preventDefault();
             setDragActive(true);
           }}
-          onDragLeave={() => setDragActive(false)}
+          onDragLeave={() => {
+            dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+            if (dragDepthRef.current === 0) setDragActive(false);
+          }}
           onDrop={handleDrop}
         >
           {state.image ? (

@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import type { Annotation } from "../domain/types";
+import type { Annotation, ImageInfo } from "../domain/types";
 import {
   EditorProvider,
   useEditorDispatch,
@@ -19,6 +19,12 @@ const secondPerson: Annotation = {
   ...person,
   id: "ann_002",
   bbox: { x1: 20, y1: 20, x2: 30, y2: 30 },
+};
+const importedImage: ImageInfo = {
+  name: "next.png",
+  width: 100,
+  height: 80,
+  url: "blob:next",
 };
 
 const loadedState = (annotations: Annotation[]) =>
@@ -66,6 +72,57 @@ it("keeps duplicate labels as separate annotations", () => {
 
   expect(loaded.annotations).toHaveLength(2);
   expect(new Set(loaded.annotations.map((annotation) => annotation.id)).size).toBe(2);
+});
+
+it("commits an imported image and annotation baseline in one transition", () => {
+  const edited = editorReducer(loadedState([person]), {
+    type: "UPDATE_ANNOTATION",
+    id: "ann_001",
+    patch: { label: "edited" },
+  });
+  const selected = editorReducer(edited, { type: "SELECT", id: "ann_001" });
+
+  const imported = editorReducer(selected, {
+    type: "COMMIT_IMPORT",
+    image: importedImage,
+    annotationBaseline: {
+      annotations: [secondPerson],
+      fileName: "next.txt",
+    },
+  });
+
+  expect(imported).toMatchObject({
+    image: importedImage,
+    labelFileName: "next.txt",
+    annotations: [secondPerson],
+    nextAnnotationNumber: 3,
+    selectedId: null,
+    past: [],
+    future: [],
+    transactionBase: null,
+    dirty: false,
+  });
+});
+
+it("commits an image-only import without resetting annotation edit state", () => {
+  const edited = editorReducer(loadedState([person]), {
+    type: "UPDATE_ANNOTATION",
+    id: "ann_001",
+    patch: { label: "edited" },
+  });
+  const selected = editorReducer(edited, { type: "SELECT", id: "ann_001" });
+
+  const imported = editorReducer(selected, {
+    type: "COMMIT_IMPORT",
+    image: importedImage,
+  });
+
+  expect(imported.image).toEqual(importedImage);
+  expect(imported.annotations).toEqual(selected.annotations);
+  expect(imported.labelFileName).toBe("scene.txt");
+  expect(imported.selectedId).toBe("ann_001");
+  expect(imported.past).toEqual(selected.past);
+  expect(imported.dirty).toBe(true);
 });
 
 it("groups many preview updates into one undo step", () => {

@@ -53,6 +53,15 @@ export async function loadImageFile(file: File): Promise<ImageInfo> {
       image.src = url;
     });
 
+    if (
+      !Number.isFinite(image.naturalWidth) ||
+      !Number.isFinite(image.naturalHeight) ||
+      image.naturalWidth <= 0 ||
+      image.naturalHeight <= 0
+    ) {
+      throw new Error(`Could not decode image "${file.name}".`);
+    }
+
     return {
       name: file.name,
       width: image.naturalWidth,

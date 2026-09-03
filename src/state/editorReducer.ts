@@ -21,6 +21,14 @@ export type EditorAction =
       annotations: Annotation[];
       fileName: string | null;
     }
+  | {
+      type: "COMMIT_IMPORT";
+      image?: ImageInfo;
+      annotationBaseline?: {
+        annotations: Annotation[];
+        fileName: string | null;
+      };
+    }
   | { type: "SELECT"; id: string | null }
   | { type: "SET_MODE"; mode: "select" | "add" }
   | { type: "BEGIN_TRANSACTION" }
@@ -146,6 +154,33 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         labelFileName: action.fileName,
         annotations: action.annotations,
         nextAnnotationNumber: nextAnnotationNumber(action.annotations),
+        selectedId: null,
+        past: [],
+        future: [],
+        transactionBase: null,
+        savedFingerprint,
+        dirty: false,
+      };
+    }
+
+    case "COMMIT_IMPORT": {
+      if (!action.annotationBaseline) {
+        if (!action.image || action.image === state.image) return state;
+        return {
+          ...state,
+          image: action.image,
+          dirty: isDirty(state.annotations, state.savedFingerprint),
+        };
+      }
+
+      const { annotations, fileName } = action.annotationBaseline;
+      const savedFingerprint = fingerprint(annotations);
+      return {
+        ...state,
+        image: action.image ?? state.image,
+        labelFileName: fileName,
+        annotations,
+        nextAnnotationNumber: nextAnnotationNumber(annotations),
         selectedId: null,
         past: [],
         future: [],
