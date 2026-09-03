@@ -81,6 +81,8 @@ function commitAtomicEdit(
   annotations: Annotation[],
   nextNumber = state.nextAnnotationNumber,
 ): EditorState {
+  if (fingerprint(annotations) === fingerprint(state.annotations)) return state;
+
   return {
     ...state,
     annotations,
@@ -90,6 +92,28 @@ function commitAtomicEdit(
     transactionBase: null,
     dirty: isDirty(annotations, state.savedFingerprint),
   };
+}
+
+function resolveTransaction(state: EditorState): EditorState {
+  if (state.transactionBase === null) return state;
+
+  const changed = fingerprint(state.annotations) !== fingerprint(state.transactionBase);
+  return {
+    ...state,
+    past: changed ? pushPast(state.past, state.transactionBase) : state.past,
+    future: changed ? [] : state.future,
+    transactionBase: null,
+    dirty: isDirty(state.annotations, state.savedFingerprint),
+  };
+}
+
+function validSelection(
+  selectedId: string | null,
+  annotations: Annotation[],
+): string | null {
+  return selectedId !== null && annotations.some(({ id }) => id === selectedId)
+    ? selectedId
+    : null;
 }
 
 export const initialEditorState: EditorState = {
@@ -163,18 +187,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
 
-    case "COMMIT_TRANSACTION": {
-      if (state.transactionBase === null) return state;
-
-      const changed = fingerprint(state.annotations) !== fingerprint(state.transactionBase);
-      return {
-        ...state,
-        past: changed ? pushPast(state.past, state.transactionBase) : state.past,
-        future: changed ? [] : state.future,
-        transactionBase: null,
-        dirty: isDirty(state.annotations, state.savedFingerprint),
-      };
-    }
+    case "COMMIT_TRANSACTION":
+      return resolveTransaction(state);
 
     case "CANCEL_TRANSACTION": {
       if (state.transactionBase === null) return state;
@@ -187,52 +201,64 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
 
-    case "UPDATE_ANNOTATION":
+    case "UPDATE_ANNOTATION": {
+      const resolved = resolveTransaction(state);
       return commitAtomicEdit(
-        state,
-        patchAnnotation(state.annotations, action.id, action.patch),
+        resolved,
+        patchAnnotation(resolved.annotations, action.id, action.patch),
       );
+    }
 
-    case "ADD_ANNOTATION":
+    case "ADD_ANNOTATION": {
+      const resolved = resolveTransaction(state);
       return commitAtomicEdit(
-        state,
-        [...state.annotations, action.annotation],
-        state.nextAnnotationNumber + 1,
+        resolved,
+        [...resolved.annotations, action.annotation],
+        resolved.nextAnnotationNumber + 1,
       );
+    }
 
     case "DELETE_ANNOTATION": {
+      const resolved = resolveTransaction(state);
       const committed = commitAtomicEdit(
-        state,
-        state.annotations.filter((annotation) => annotation.id !== action.id),
+        resolved,
+        resolved.annotations.filter((annotation) => annotation.id !== action.id),
       );
-      return state.selectedId === action.id ? { ...committed, selectedId: null } : committed;
+      if (committed === resolved) return resolved;
+      return resolved.selectedId === action.id
+        ? { ...committed, selectedId: null }
+        : committed;
     }
 
     case "UNDO": {
-      const annotations = state.past.at(-1);
-      if (!annotations) return state;
+      const resolved = resolveTransaction(state);
+      const annotations = resolved.past.at(-1);
+      if (!annotations) return resolved;
 
       return {
-        ...state,
+        ...resolved,
         annotations,
-        past: state.past.slice(0, -1),
-        future: [state.annotations, ...state.future],
+        selectedId: validSelection(resolved.selectedId, annotations),
+        past: resolved.past.slice(0, -1),
+        future: [resolved.annotations, ...resolved.future],
         transactionBase: null,
-        dirty: isDirty(annotations, state.savedFingerprint),
+        dirty: isDirty(annotations, resolved.savedFingerprint),
       };
     }
 
     case "REDO": {
-      const [annotations, ...future] = state.future;
-      if (!annotations) return state;
+      const resolved = resolveTransaction(state);
+      const [annotations, ...future] = resolved.future;
+      if (!annotations) return resolved;
 
       return {
-        ...state,
+        ...resolved,
         annotations,
-        past: pushPast(state.past, state.annotations),
+        selectedId: validSelection(resolved.selectedId, annotations),
+        past: pushPast(resolved.past, resolved.annotations),
         future,
         transactionBase: null,
-        dirty: isDirty(annotations, state.savedFingerprint),
+        dirty: isDirty(annotations, resolved.savedFingerprint),
       };
     }
 
