@@ -219,6 +219,10 @@ input,
   color: var(--accent);
 }
 
+.workspace-examples a + a {
+  margin-left: var(--space-md);
+}
+
 .viewport-svg {
   display: block;
   width: 100%;
