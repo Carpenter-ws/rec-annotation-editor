@@ -48,7 +48,7 @@ function mockImageEnvironment(outcomes: readonly (DecodedImage | "error")[]) {
   const OriginalURL = globalThis.URL;
   let urlNumber = 0;
   let outcomeNumber = 0;
-  const createObjectURL = vi.fn(() => `blob:image-${++urlNumber}`);
+  const createObjectURL = vi.fn((_blob: Blob) => `blob:image-${++urlNumber}`);
   const revokeObjectURL = vi.fn();
   class MockURL extends OriginalURL {}
   Object.defineProperties(MockURL, {
@@ -178,6 +178,36 @@ async function settleDeferred(callback: () => void): Promise<void> {
     callback();
     await Promise.resolve();
   });
+}
+
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
+
+function mockDownloadEnvironment() {
+  const OriginalURL = globalThis.URL;
+  const blobs: Blob[] = [];
+  const createObjectURL = vi.fn((blob: Blob) => {
+    blobs.push(blob);
+    return `blob:download-${blobs.length}`;
+  });
+  const revokeObjectURL = vi.fn();
+  class MockURL extends OriginalURL {}
+  Object.defineProperties(MockURL, {
+    createObjectURL: { value: createObjectURL },
+    revokeObjectURL: { value: revokeObjectURL },
+  });
+  vi.stubGlobal("URL", MockURL);
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(() => undefined);
+
+  return { blobs, click, createObjectURL, revokeObjectURL };
 }
 
 afterEach(() => {
@@ -1536,4 +1566,1081 @@ it("commits a same-drop image and labels through one reducer action", async () =
       annotationBaseline: expect.objectContaining({ fileName: "scene.txt" }),
     }),
   ]);
+});
+
+it("saves edited TXT with a deterministic label stem and marks that snapshot clean", async () => {
+  const user = userEvent.setup();
+  const { blobs, click } = mockDownloadEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "aerial.scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.clear(expression);
+  await user.type(expression, "edited person");
+  fireEvent.blur(expression);
+
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(click).toHaveBeenCalledOnce();
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "aerial.scene-edited.txt",
+  );
+  expect(await readBlob(blobs[0]!)).toBe(
+    "0.00 0.00 10.00 10.00 edited person 0\n",
+  );
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("saves an empty document with the deterministic annotations stem", async () => {
+  const user = userEvent.setup();
+  const { blobs, click } = mockDownloadEnvironment();
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(click).toHaveBeenCalledOnce();
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "annotations-edited.txt",
+  );
+  expect(await readBlob(blobs[0]!)).toBe("");
+});
+
+it("uses the image stem when saving without an imported label file", async () => {
+  const user = userEvent.setup();
+  const { createObjectURL } = mockImageEnvironment([
+    { width: 100, height: 80 },
+  ]);
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(() => undefined);
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "aerial.scene.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("100 × 80")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "aerial.scene-edited.txt",
+  );
+  expect(await readBlob(createObjectURL.mock.calls[1]![0] as Blob)).toBe("");
+});
+
+it("retains a valid picker label handle and uses it for Save", async () => {
+  const user = userEvent.setup();
+  const write = vi.fn().mockResolvedValue(undefined);
+  const close = vi.fn().mockResolvedValue(undefined);
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockResolvedValue({ write, close }),
+  };
+  const showOpenFilePicker = vi.fn().mockResolvedValue([handle]);
+  vi.stubGlobal("showOpenFilePicker", showOpenFilePicker);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.clear(expression);
+  await user.type(expression, "saved through handle");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(showOpenFilePicker).toHaveBeenCalledOnce();
+  expect(handle.createWritable).toHaveBeenCalledOnce();
+  expect(write).toHaveBeenCalledWith(
+    "0.00 0.00 10.00 10.00 saved through handle 0\n",
+  );
+  expect(close).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("clears the retained handle after a valid hidden-input label import", async () => {
+  const user = userEvent.setup();
+  const { click } = mockDownloadEnvironment();
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  expect(await screen.findByText("picked label")).toBeVisible();
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 replacement label 0", "replacement.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(handle.createWritable).not.toHaveBeenCalled();
+  expect(click).toHaveBeenCalledOnce();
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "replacement-edited.txt",
+  );
+});
+
+it("clears the retained handle after a valid dropped label import", async () => {
+  const user = userEvent.setup();
+  const { click } = mockDownloadEnvironment();
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  expect(await screen.findByText("picked label")).toBeVisible();
+  fireEvent.drop(screen.getByRole("region", { name: "Image workspace" }), {
+    dataTransfer: {
+      files: [textFile("0 0 10 10 dropped label 0", "dropped.txt")],
+    },
+  });
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(handle.createWritable).not.toHaveBeenCalled();
+  expect(click).toHaveBeenCalledOnce();
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "dropped-edited.txt",
+  );
+});
+
+it("preserves the retained handle when a hidden-input label import is invalid", async () => {
+  const user = userEvent.setup();
+  const { click } = mockDownloadEnvironment();
+  const write = vi.fn().mockResolvedValue(undefined);
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write,
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  expect(await screen.findByText("picked label")).toBeVisible();
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 0 10 invalid replacement 0", "invalid.txt"),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "Could not import labels" }),
+  ).toBeVisible();
+  expect(screen.getByText("picked label")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(handle.createWritable).toHaveBeenCalledOnce();
+  expect(write).toHaveBeenCalledWith("0.00 0.00 10.00 10.00 picked label 0\n");
+  expect(click).not.toHaveBeenCalled();
+});
+
+it("preserves the retained handle when a later open picker is cancelled", async () => {
+  const user = userEvent.setup();
+  const write = vi.fn().mockResolvedValue(undefined);
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write,
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  const showOpenFilePicker = vi
+    .fn()
+    .mockResolvedValueOnce([handle])
+    .mockRejectedValueOnce(new DOMException("", "AbortError"));
+  vi.stubGlobal("showOpenFilePicker", showOpenFilePicker);
+  render(<App />);
+  const openLabels = screen.getByRole("button", { name: "Open labels" });
+
+  await user.click(openLabels);
+  expect(await screen.findByText("picked label")).toBeVisible();
+  await user.click(openLabels);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(showOpenFilePicker).toHaveBeenCalledTimes(2);
+  expect(handle.createWritable).toHaveBeenCalledOnce();
+  expect(write).toHaveBeenCalledWith("0.00 0.00 10.00 10.00 picked label 0\n");
+});
+
+it.each(["hidden input", "drop"] as const)(
+  "does not restore a stale picker handle after a newer valid %s import",
+  async (newerSource) => {
+    const user = userEvent.setup();
+    const { click } = mockDownloadEnvironment();
+    const firstHandle = {
+      getFile: vi
+        .fn()
+        .mockResolvedValue(textFile("0 0 10 10 first picker 0", "first.txt")),
+      createWritable: vi.fn(),
+    };
+    const staleFile = deferredTextFile("stale.txt");
+    const staleHandle = {
+      getFile: vi.fn().mockResolvedValue(staleFile.file),
+      createWritable: vi.fn(),
+    };
+    const showOpenFilePicker = vi
+      .fn()
+      .mockResolvedValueOnce([firstHandle])
+      .mockResolvedValueOnce([staleHandle]);
+    vi.stubGlobal("showOpenFilePicker", showOpenFilePicker);
+    render(<App />);
+    const openLabels = screen.getByRole("button", { name: "Open labels" });
+
+    await user.click(openLabels);
+    expect(await screen.findByText("first picker")).toBeVisible();
+    await user.click(openLabels);
+    await waitFor(() => expect(staleFile.file.text).toHaveBeenCalledOnce());
+
+    const newer = textFile("0 0 10 10 newer labels 0", "newer.txt");
+    if (newerSource === "hidden input") {
+      await user.upload(screen.getByLabelText("Open labels"), newer);
+    } else {
+      fireEvent.drop(
+        screen.getByRole("region", { name: "Image workspace" }),
+        { dataTransfer: { files: [newer] } },
+      );
+    }
+    expect(await screen.findByText("newer labels")).toBeVisible();
+
+    await settleDeferred(() =>
+      staleFile.resolve("0 0 10 10 stale picker labels 0"),
+    );
+    expect(screen.getByText("newer labels")).toBeVisible();
+    expect(screen.queryByText("stale picker labels")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    expect(firstHandle.createWritable).not.toHaveBeenCalled();
+    expect(staleHandle.createWritable).not.toHaveBeenCalled();
+    expect(click).toHaveBeenCalledOnce();
+    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+      "newer-edited.txt",
+    );
+  },
+);
+
+it("retains the label handle across an image-only import", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  const write = vi.fn().mockResolvedValue(undefined);
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write,
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  expect(await screen.findByText("picked label")).toBeVisible();
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("100 × 80")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(handle.createWritable).toHaveBeenCalledOnce();
+  expect(write).toHaveBeenCalledWith("0.00 0.00 10.00 10.00 picked label 0\n");
+});
+
+it("preserves the previous handle when a newer picker label is invalid", async () => {
+  const user = userEvent.setup();
+  const firstWrite = vi.fn().mockResolvedValue(undefined);
+  const firstHandle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 first picker 0", "first.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write: firstWrite,
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  const invalidHandle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 0 10 invalid picker 0", "invalid.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  vi.stubGlobal(
+    "showOpenFilePicker",
+    vi
+      .fn()
+      .mockResolvedValueOnce([firstHandle])
+      .mockResolvedValueOnce([invalidHandle]),
+  );
+  render(<App />);
+  const openLabels = screen.getByRole("button", { name: "Open labels" });
+
+  await user.click(openLabels);
+  expect(await screen.findByText("first picker")).toBeVisible();
+  await user.click(openLabels);
+  expect(
+    await screen.findByRole("dialog", { name: "Could not import labels" }),
+  ).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(firstHandle.createWritable).toHaveBeenCalledOnce();
+  expect(invalidHandle.createWritable).not.toHaveBeenCalled();
+  expect(firstWrite).toHaveBeenCalledWith(
+    "0.00 0.00 10.00 10.00 first picker 0\n",
+  );
+});
+
+it("surfaces non-cancellation open-picker failures in the existing error UI", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal(
+    "showOpenFilePicker",
+    vi.fn().mockRejectedValue(new Error("open picker failed")),
+  );
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+
+  expect(
+    await screen.findByRole("dialog", { name: "Could not open labels" }),
+  ).toHaveTextContent("open picker failed");
+});
+
+it("surfaces save failures without marking edited annotations clean", async () => {
+  const user = userEvent.setup();
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockRejectedValue(new Error("disk full")),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(
+    await screen.findByRole("dialog", { name: "Could not save annotations" }),
+  ).toHaveTextContent("disk full");
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("keeps retained-handle AbortError cancellation silent and dirty", async () => {
+  const user = userEvent.setup();
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi
+      .fn()
+      .mockRejectedValue(new DOMException("", "AbortError")),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("saves through Save As and marks the written annotation snapshot clean", async () => {
+  const user = userEvent.setup();
+  const write = vi.fn().mockResolvedValue(undefined);
+  const close = vi.fn().mockResolvedValue(undefined);
+  const showSaveFilePicker = vi.fn().mockResolvedValue({
+    createWritable: vi.fn().mockResolvedValue({ write, close }),
+  });
+  vi.stubGlobal("showSaveFilePicker", showSaveFilePicker);
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: "Save As" }));
+
+  expect(showSaveFilePicker).toHaveBeenCalledWith({
+    suggestedName: "scene-edited.txt",
+  });
+  expect(write).toHaveBeenCalledWith(
+    "0.00 0.00 10.00 10.00 person edited 0\n",
+  );
+  expect(close).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("falls back to a Save As download and marks the downloaded snapshot clean", async () => {
+  const user = userEvent.setup();
+  const { click } = mockDownloadEnvironment();
+  vi.stubGlobal("showSaveFilePicker", undefined);
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: "Save As" }));
+
+  expect(click).toHaveBeenCalledOnce();
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "scene-edited.txt",
+  );
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("keeps Save As cancellation silent without marking edits clean", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal(
+    "showSaveFilePicker",
+    vi.fn().mockRejectedValue(new DOMException("", "AbortError")),
+  );
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: "Save As" }));
+
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("surfaces Save As failures without marking edited annotations clean", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal(
+    "showSaveFilePicker",
+    vi.fn().mockRejectedValue(new Error("Save As failed")),
+  );
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: "Save As" }));
+
+  expect(
+    await screen.findByRole("dialog", { name: "Could not save annotations" }),
+  ).toHaveTextContent("Save As failed");
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("does not mark newer edits clean when an older Save finishes", async () => {
+  const user = userEvent.setup();
+  const pendingWrite = deferred<void>();
+  const write = vi.fn(() => pendingWrite.promise);
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 person 0", "scene.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write,
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " first");
+  fireEvent.blur(expression);
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() => expect(write).toHaveBeenCalledOnce());
+
+  await user.click(expression);
+  await user.type(expression, " newer");
+  fireEvent.blur(expression);
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+  await settleDeferred(() => pendingWrite.resolve());
+
+  expect(write).toHaveBeenCalledWith(
+    "0.00 0.00 10.00 10.00 person first 0\n",
+  );
+  expect(screen.getByDisplayValue("person first newer")).toBeVisible();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("does not mark newer edits clean when an older Save As finishes", async () => {
+  const user = userEvent.setup();
+  const pendingWrite = deferred<void>();
+  const write = vi.fn(() => pendingWrite.promise);
+  vi.stubGlobal(
+    "showSaveFilePicker",
+    vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({
+        write,
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    }),
+  );
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " first");
+  fireEvent.blur(expression);
+  await user.click(screen.getByRole("button", { name: "Save As" }));
+  await waitFor(() => expect(write).toHaveBeenCalledOnce());
+
+  await user.click(expression);
+  await user.type(expression, " newer");
+  fireEvent.blur(expression);
+  await settleDeferred(() => pendingWrite.resolve());
+
+  expect(write).toHaveBeenCalledWith(
+    "0.00 0.00 10.00 10.00 person first 0\n",
+  );
+  expect(screen.getByDisplayValue("person first newer")).toBeVisible();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("maps editor history and delete shortcuts while protecting editable fields", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  await user.click(await screen.findByText("person", { exact: true }));
+
+  fireEvent.keyDown(window, { key: "Delete" });
+  expect(screen.getByText("0 annotations")).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+  expect(screen.getByText("1 annotation")).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "Z", ctrlKey: true, shiftKey: true });
+  expect(screen.getByText("0 annotations")).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "z", metaKey: true });
+  expect(screen.getByText("1 annotation")).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+  expect(screen.getByText("0 annotations")).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+  const expression = screen.getByRole("textbox", { name: "Expression" });
+  act(() => expression.focus());
+  expect(expression).toHaveFocus();
+  fireEvent.keyDown(window, { key: "Delete" });
+  fireEvent.keyDown(window, { key: "Backspace" });
+  expect(screen.getByText("1 annotation")).toBeVisible();
+});
+
+it("commits a focused expression transaction before shortcut Undo", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.click(expression);
+  await user.clear(expression);
+  await user.type(expression, "vehicle");
+  reducer.mockClear();
+
+  fireEvent.keyDown(expression, { key: "z", ctrlKey: true });
+
+  await waitFor(() => expect(expression).toHaveValue("person"));
+  expect(expression).not.toHaveFocus();
+  expect(
+    reducer.mock.calls
+      .map(([, action]) => action.type)
+      .filter((type) => ["COMMIT_TRANSACTION", "UNDO"].includes(type)),
+  ).toEqual(["COMMIT_TRANSACTION", "UNDO"]);
+});
+
+it("commits a focused numeric draft before shortcut Undo", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 10 30 30 person 0", "scene.txt"),
+  );
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  await user.click(x1);
+  await user.clear(x1);
+  await user.type(x1, "15");
+  reducer.mockClear();
+
+  fireEvent.keyDown(x1, { key: "z", metaKey: true });
+
+  await waitFor(() => expect(x1).toHaveValue("10"));
+  expect(x1).not.toHaveFocus();
+  expect(
+    reducer.mock.calls
+      .map(([, action]) => action.type)
+      .filter((type) => ["UPDATE_ANNOTATION", "UNDO"].includes(type)),
+  ).toEqual(["UPDATE_ANNOTATION", "UNDO"]);
+});
+
+it("commits a focused expression transaction before shortcut Save", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  const { blobs, click } = mockDownloadEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.click(expression);
+  await user.clear(expression);
+  await user.type(expression, "delivery vehicle");
+  reducer.mockClear();
+
+  fireEvent.keyDown(expression, { key: "s", ctrlKey: true });
+
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+  expect(await readBlob(blobs[0]!)).toBe(
+    "0.00 0.00 10.00 10.00 delivery vehicle 0\n",
+  );
+  expect(expression).not.toHaveFocus();
+  expect(
+    reducer.mock.calls
+      .map(([, action]) => action.type)
+      .filter((type) => ["COMMIT_TRANSACTION", "MARK_SAVED"].includes(type)),
+  ).toEqual(["COMMIT_TRANSACTION", "MARK_SAVED"]);
+});
+
+it("commits a focused numeric draft before shortcut Save", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 10 30 30 person 0", "scene.txt"),
+  );
+  const { blobs, click } = mockDownloadEnvironment();
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  await user.click(x1);
+  await user.clear(x1);
+  await user.type(x1, "15");
+  reducer.mockClear();
+
+  fireEvent.keyDown(x1, { key: "s", metaKey: true });
+
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+  expect(await readBlob(blobs[0]!)).toBe(
+    "15.00 10.00 30.00 30.00 person 0\n",
+  );
+  expect(x1).not.toHaveFocus();
+  expect(
+    reducer.mock.calls
+      .map(([, action]) => action.type)
+      .filter((type) => ["UPDATE_ANNOTATION", "MARK_SAVED"].includes(type)),
+  ).toEqual(["UPDATE_ANNOTATION", "MARK_SAVED"]);
+});
+
+it("exposes disabled-aware Undo and Redo toolbar controls", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  const undo = screen.getByRole("button", { name: "Undo" });
+  const redo = screen.getByRole("button", { name: "Redo" });
+
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.click(expression);
+  expect(undo).toBeDisabled();
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+  expect(undo).toBeEnabled();
+  expect(redo).toBeDisabled();
+
+  await user.click(undo);
+  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
+    "person",
+  );
+  expect(undo).toBeDisabled();
+  expect(redo).toBeEnabled();
+
+  await user.click(redo);
+  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
+    "person edited",
+  );
+  expect(undo).toBeEnabled();
+  expect(redo).toBeDisabled();
+});
+
+it("exports exact TXT and JSON snapshots without marking edits clean", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "aerial.scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 30 40 delivery truck 0", "aerial.labels.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+  const { blobs, click } = mockDownloadEnvironment();
+
+  await user.click(screen.getByRole("button", { name: "Export" }));
+  const exportMenu = screen.getByRole("menu", { name: "Export annotations" });
+  expect(exportMenu).toBeVisible();
+  await user.click(
+    screen.getByRole("menuitem", { name: "Export TXT" }),
+  );
+
+  expect(exportMenu).not.toBeInTheDocument();
+  expect(click).toHaveBeenCalledTimes(1);
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "aerial.labels.txt",
+  );
+  expect(blobs[0]?.type).toBe("text/plain");
+  expect(await readBlob(blobs[0]!)).toBe(
+    "10.00 20.00 30.00 40.00 delivery truck edited 0\n",
+  );
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  await user.click(screen.getByRole("button", { name: "Export" }));
+  await user.click(
+    screen.getByRole("menuitem", { name: "Export JSON" }),
+  );
+
+  expect(click).toHaveBeenCalledTimes(2);
+  expect((click.mock.contexts[1] as HTMLAnchorElement).download).toBe(
+    "aerial.labels.json",
+  );
+  expect(blobs[1]?.type).toBe("application/json");
+  expect(JSON.parse(await readBlob(blobs[1]!))).toEqual({
+    image: "aerial.scene.png",
+    width: 100,
+    height: 80,
+    annotations: [
+      {
+        id: "ann_001",
+        bbox: [10, 20, 30, 40],
+        label: "delivery truck edited",
+        reservedField: "0",
+      },
+    ],
+  });
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("installs the beforeunload warning only while annotations are dirty", async () => {
+  const user = userEvent.setup();
+  mockDownloadEnvironment();
+  const addEventListener = vi.spyOn(window, "addEventListener");
+  const removeEventListener = vi.spyOn(window, "removeEventListener");
+  render(<App />);
+
+  expect(
+    addEventListener.mock.calls.some(([type]) => type === "beforeunload"),
+  ).toBe(false);
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  expect(
+    addEventListener.mock.calls.some(([type]) => type === "beforeunload"),
+  ).toBe(false);
+
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  let warningListener!: EventListener;
+  await waitFor(() => {
+    const call = addEventListener.mock.calls.find(
+      ([type]) => type === "beforeunload",
+    );
+    expect(call).toBeDefined();
+    warningListener = call![1] as EventListener;
+  });
+  const event = {
+    preventDefault: vi.fn(),
+    returnValue: "unchanged",
+  } as unknown as BeforeUnloadEvent;
+  warningListener(event);
+  expect(event.preventDefault).toHaveBeenCalledOnce();
+  expect(event.returnValue).toBe("");
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() => {
+    expect(removeEventListener).toHaveBeenCalledWith(
+      "beforeunload",
+      warningListener,
+    );
+  });
+});
+
+it("keeps the search field focused while its global Save shortcut runs", async () => {
+  const user = userEvent.setup();
+  const { blobs, click } = mockDownloadEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 delivery person 0", "scene.txt"),
+  );
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+
+  const search = screen.getByRole("searchbox", {
+    name: "Search annotations",
+  });
+  await user.click(search);
+  await user.type(search, "delivery");
+  fireEvent.keyDown(search, { key: "s", ctrlKey: true });
+
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+  expect(search).toHaveFocus();
+  expect(search).toHaveValue("delivery");
+  expect(await readBlob(blobs[0]!)).toBe(
+    "0.00 0.00 10.00 10.00 delivery person edited 0\n",
+  );
+});
+
+it("keeps concurrent Save completions from cleaning edits made after the newest save", async () => {
+  const user = userEvent.setup();
+  const firstWrite = deferred<void>();
+  const secondWrite = deferred<void>();
+  const write = vi
+    .fn()
+    .mockImplementationOnce(() => firstWrite.promise)
+    .mockImplementationOnce(() => secondWrite.promise);
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 person 0", "scene.txt")),
+    createWritable: vi.fn().mockResolvedValue({
+      write,
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  const expression = await screen.findByRole("textbox", {
+    name: "Expression",
+  });
+  await user.type(expression, " first");
+  fireEvent.blur(expression);
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+  await user.click(expression);
+  await user.type(expression, " second");
+  fireEvent.blur(expression);
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+
+  await settleDeferred(() => secondWrite.resolve());
+  await waitFor(() => {
+    expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+  });
+  await user.click(expression);
+  await user.type(expression, " third");
+  fireEvent.blur(expression);
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  await settleDeferred(() => firstWrite.resolve());
+
+  expect(write.mock.calls.map(([contents]) => contents)).toEqual([
+    "0.00 0.00 10.00 10.00 person first 0\n",
+    "0.00 0.00 10.00 10.00 person first second 0\n",
+  ]);
+  expect(expression).toHaveValue("person first second third");
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+});
+
+it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  const addBox = screen.getByRole("button", { name: "Add Box" });
+  await user.click(addBox);
+  expect(addBox).toHaveAttribute("aria-pressed", "true");
+  reducer.mockClear();
+
+  fireEvent.keyDown(window, { key: "Escape" });
+
+  expect(addBox).toHaveAttribute("aria-pressed", "false");
+  expect(
+    reducer.mock.calls.filter(([, action]) => action.type === "SET_MODE"),
+  ).toEqual([[expect.anything(), { type: "SET_MODE", mode: "select" }]]);
 });

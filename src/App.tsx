@@ -8,10 +8,19 @@ import {
   type JSX,
 } from "react";
 import {
+  downloadText,
   loadImageFile,
   partitionDroppedFiles,
+  pickTextFile,
   readTextFile,
+  saveTextAs,
+  writeTextToHandle,
 } from "./app/fileIO";
+import {
+  isEditableTarget,
+  useKeyboardShortcuts,
+} from "./app/useKeyboardShortcuts";
+import { useUnsavedWarning } from "./app/useUnsavedWarning";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
 import { AnnotationPanel } from "./components/AnnotationPanel";
 import { NewAnnotationDialog } from "./components/NewAnnotationDialog";
@@ -20,6 +29,10 @@ import { Toolbar } from "./components/Toolbar";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
 import { clampBBox } from "./domain/bbox";
 import { parseAnnotationText } from "./domain/parser";
+import {
+  serializeAnnotationsTxt,
+  serializeDocumentJson,
+} from "./domain/serializer";
 import type { Annotation, BBox, ImageBounds, ImageInfo } from "./domain/types";
 import {
   EditorProvider,
@@ -92,8 +105,29 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The file could not be imported.";
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function nextAnnotationId(nextAnnotationNumber: number): string {
   return `ann_${String(nextAnnotationNumber).padStart(3, "0")}`;
+}
+
+function fileStem(fileName: string): string {
+  return fileName.replace(/\.[^./\\]+$/, "");
+}
+
+function editedTxtName(labelFileName: string | null, imageName: string | null) {
+  const stem = fileStem(labelFileName ?? imageName ?? "annotations");
+  return `${stem}-edited.txt`;
+}
+
+function exportFileName(
+  labelFileName: string | null,
+  imageName: string | null,
+  extension: "txt" | "json",
+) {
+  return `${fileStem(labelFileName ?? imageName ?? "annotations")}.${extension}`;
 }
 
 function EditorWorkspace(): JSX.Element {
@@ -110,8 +144,10 @@ function EditorWorkspace(): JSX.Element {
   const dragDepthRef = useRef(0);
   const mountedRef = useRef(true);
   const acceptedImageUrlRef = useRef<string | null>(null);
+  const labelHandleRef = useRef<FileSystemFileHandle | null>(null);
   const pendingCenterIdRef = useRef<string | null>(null);
   stateRef.current = state;
+  useUnsavedWarning(state.dirty);
   const imageBounds = useMemo<ImageBounds | null>(
     () =>
       state.image
@@ -151,13 +187,15 @@ function EditorWorkspace(): JSX.Element {
   const importFiles = async (
     files: ImportFiles,
     rejected: readonly File[] = [],
+    labelHandle: FileSystemFileHandle | null = null,
+    requestedGeneration?: number,
   ): Promise<void> => {
     if (files.image || files.labels) {
       setDraftBBox(null);
       pendingCenterIdRef.current = null;
       dispatch({ type: "SET_MODE", mode: "select" });
     }
-    const generation = ++importGenerationRef.current;
+    const generation = requestedGeneration ?? ++importGenerationRef.current;
     const isCurrent = () =>
       mountedRef.current && importGenerationRef.current === generation;
     setErrorReport(null);
@@ -244,6 +282,8 @@ function EditorWorkspace(): JSX.Element {
       return;
     }
 
+    if (files.labels) labelHandleRef.current = labelHandle;
+
     if (loadedImage) {
       const previousUrl = acceptedImageUrlRef.current;
       acceptedImageUrlRef.current = loadedImage.url;
@@ -306,14 +346,168 @@ function EditorWorkspace(): JSX.Element {
     dispatch({ type: "SET_MODE", mode: "select" });
   };
 
+  const pickLabels = async () => {
+    const generation = ++importGenerationRef.current;
+    try {
+      const picked = await pickTextFile();
+      if (
+        !picked ||
+        !mountedRef.current ||
+        importGenerationRef.current !== generation
+      ) {
+        return;
+      }
+      await importFiles({ labels: picked.file }, [], picked.handle, generation);
+    } catch (error) {
+      if (
+        !mountedRef.current ||
+        importGenerationRef.current !== generation
+      ) {
+        return;
+      }
+      setErrorReport({
+        title: "Could not open labels",
+        issues: [errorMessage(error)],
+      });
+    }
+  };
+
+  const save = async () => {
+    const latestState = stateRef.current;
+    const snapshot = latestState.annotations;
+    try {
+      const contents = serializeAnnotationsTxt(snapshot);
+      if (labelHandleRef.current) {
+        await writeTextToHandle(labelHandleRef.current, contents);
+      } else {
+        downloadText(
+          contents,
+          editedTxtName(
+            latestState.labelFileName,
+            latestState.image?.name ?? null,
+          ),
+          "text/plain",
+        );
+      }
+      if (stateRef.current.annotations === snapshot) {
+        dispatch({ type: "MARK_SAVED" });
+      }
+    } catch (error) {
+      if (isAbortError(error)) return;
+      setErrorReport({
+        title: "Could not save annotations",
+        issues: [errorMessage(error)],
+      });
+    }
+  };
+
+  const saveAs = async () => {
+    const latestState = stateRef.current;
+    const snapshot = latestState.annotations;
+    try {
+      const result = await saveTextAs(
+        serializeAnnotationsTxt(snapshot),
+        editedTxtName(latestState.labelFileName, latestState.image?.name ?? null),
+        "text/plain",
+      );
+      if (
+        result !== "cancelled" &&
+        stateRef.current.annotations === snapshot
+      ) {
+        dispatch({ type: "MARK_SAVED" });
+      }
+    } catch (error) {
+      if (isAbortError(error)) return;
+      setErrorReport({
+        title: "Could not save annotations",
+        issues: [errorMessage(error)],
+      });
+    }
+  };
+
+  const exportAnnotations = (format: "txt" | "json") => {
+    const latestState = stateRef.current;
+    try {
+      const contents =
+        format === "txt"
+          ? serializeAnnotationsTxt(latestState.annotations)
+          : serializeDocumentJson(latestState);
+      downloadText(
+        contents,
+        exportFileName(
+          latestState.labelFileName,
+          latestState.image?.name ?? null,
+          format,
+        ),
+        format === "txt" ? "text/plain" : "application/json",
+      );
+    } catch (error) {
+      setErrorReport({
+        title: "Could not export annotations",
+        issues: [errorMessage(error)],
+      });
+    }
+  };
+
+  const runAfterEditorBlur = (action: () => void) => {
+    const activeElement = document.activeElement;
+    if (
+      isEditableTarget(activeElement) &&
+      activeElement instanceof HTMLElement &&
+      activeElement.closest("[data-annotation-id]")
+    ) {
+      activeElement.blur();
+      window.setTimeout(action, 0);
+      return;
+    }
+    action();
+  };
+
+  useKeyboardShortcuts({
+    onUndo: () =>
+      runAfterEditorBlur(() => dispatch({ type: "UNDO" })),
+    onRedo: () =>
+      runAfterEditorBlur(() => dispatch({ type: "REDO" })),
+    onSave: () => runAfterEditorBlur(() => void save()),
+    onDelete: () => {
+      const selectedId = stateRef.current.selectedId;
+      if (selectedId) {
+        dispatch({ type: "DELETE_ANNOTATION", id: selectedId });
+      }
+    },
+    onEscape: () => {
+      if (draftBBox === null && stateRef.current.mode === "add") {
+        dispatch({ type: "SET_MODE", mode: "select" });
+      }
+    },
+  });
+
   return (
     <div className="app-shell">
       <Toolbar
         imageName={state.image?.name ?? null}
         labelFileName={state.labelFileName}
+        dirty={state.dirty}
         scale={zoomScale}
         onOpenImage={(file) => void importFiles({ image: file })}
         onOpenLabels={(file) => void importFiles({ labels: file })}
+        onPickLabels={() => void pickLabels()}
+        onSave={() => void save()}
+        onSaveAs={() => void saveAs()}
+        undoDisabled={
+          state.past.length === 0 &&
+          (state.transactionBase === null ||
+            sameAnnotations(state.transactionBase, state.annotations))
+        }
+        redoDisabled={state.future.length === 0}
+        onUndo={() =>
+          runAfterEditorBlur(() => dispatch({ type: "UNDO" }))
+        }
+        onRedo={() =>
+          runAfterEditorBlur(() => dispatch({ type: "REDO" }))
+        }
+        onExportTxt={() => exportAnnotations("txt")}
+        onExportJson={() => exportAnnotations("json")}
         onZoomOut={() => viewportRef.current?.zoomBy(1 / 1.2)}
         onZoomIn={() => viewportRef.current?.zoomBy(1.2)}
         onFit={() => viewportRef.current?.fit()}

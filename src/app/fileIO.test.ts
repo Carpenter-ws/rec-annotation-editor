@@ -1,4 +1,234 @@
-import { loadImageFile, partitionDroppedFiles, readTextFile } from "./fileIO";
+import {
+  downloadText,
+  loadImageFile,
+  partitionDroppedFiles,
+  pickTextFile,
+  readTextFile,
+  saveTextAs,
+  writeTextToHandle,
+} from "./fileIO";
+
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
+
+describe("downloadText", () => {
+  const OriginalURL = globalThis.URL;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("downloads the requested contents, name, and MIME through a temporary object URL", async () => {
+    let downloadedBlob: Blob | null = null;
+    const createObjectURL = vi.fn((blob: Blob) => {
+      downloadedBlob = blob;
+      return "blob:download";
+    });
+    const revokeObjectURL = vi.fn();
+    class MockURL extends OriginalURL {}
+    Object.defineProperties(MockURL, {
+      createObjectURL: { value: createObjectURL },
+      revokeObjectURL: { value: revokeObjectURL },
+    });
+    vi.stubGlobal("URL", MockURL);
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    downloadText("annotation text", "scene-edited.txt", "text/plain");
+
+    expect(click).toHaveBeenCalledOnce();
+    const anchor = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(anchor.download).toBe("scene-edited.txt");
+    expect(anchor.href).toBe("blob:download");
+    expect(document.body).not.toContainElement(anchor);
+    expect(downloadedBlob).not.toBeNull();
+    expect(downloadedBlob!.type).toBe("text/plain");
+    expect(await readBlob(downloadedBlob!)).toBe("annotation text");
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:download");
+  });
+
+  it("removes the temporary anchor and revokes its URL when clicking fails", () => {
+    const createObjectURL = vi.fn(() => "blob:failed-download");
+    const revokeObjectURL = vi.fn();
+    class MockURL extends OriginalURL {}
+    Object.defineProperties(MockURL, {
+      createObjectURL: { value: createObjectURL },
+      revokeObjectURL: { value: revokeObjectURL },
+    });
+    vi.stubGlobal("URL", MockURL);
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {
+        throw new Error("click failed");
+      });
+
+    expect(() => downloadText("x", "x.txt", "text/plain")).toThrow(
+      "click failed",
+    );
+
+    const anchor = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(document.body).not.toContainElement(anchor);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:failed-download");
+  });
+});
+
+describe("writeTextToHandle", () => {
+  it("writes the complete contents and closes the writable stream", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const handle = {
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    };
+
+    await writeTextToHandle(
+      handle as unknown as FileSystemFileHandle,
+      "annotation text",
+    );
+
+    expect(write).toHaveBeenCalledOnce();
+    expect(write).toHaveBeenCalledWith("annotation text");
+    expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("saveTextAs", () => {
+  const OriginalURL = globalThis.URL;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("downloads through a temporary object URL when the save picker is unavailable", async () => {
+    vi.stubGlobal("showSaveFilePicker", undefined);
+    const createObjectURL = vi.fn(() => "blob:fallback");
+    const revokeObjectURL = vi.fn();
+    class MockURL extends OriginalURL {}
+    Object.defineProperties(MockURL, {
+      createObjectURL: { value: createObjectURL },
+      revokeObjectURL: { value: revokeObjectURL },
+    });
+    vi.stubGlobal("URL", MockURL);
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    await expect(
+      saveTextAs("content", "scene-edited.txt", "text/plain"),
+    ).resolves.toBe("downloaded");
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:fallback");
+  });
+
+  it("uses a writable file handle when the save picker is available", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const showSaveFilePicker = vi.fn().mockResolvedValue({
+      createWritable: vi.fn().mockResolvedValue({ write, close }),
+    });
+    vi.stubGlobal("showSaveFilePicker", showSaveFilePicker);
+
+    await expect(
+      saveTextAs("content", "scene-edited.txt", "text/plain"),
+    ).resolves.toBe("saved");
+
+    expect(showSaveFilePicker).toHaveBeenCalledWith({
+      suggestedName: "scene-edited.txt",
+    });
+    expect(write).toHaveBeenCalledWith("content");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("treats AbortError as cancellation instead of an application error", async () => {
+    vi.stubGlobal(
+      "showSaveFilePicker",
+      vi.fn().mockRejectedValue(new DOMException("", "AbortError")),
+    );
+
+    await expect(
+      saveTextAs("x", "x.txt", "text/plain"),
+    ).resolves.toBe("cancelled");
+  });
+
+  it("propagates non-abort save failures", async () => {
+    const failure = new Error("permission denied");
+    vi.stubGlobal(
+      "showSaveFilePicker",
+      vi.fn().mockRejectedValue(failure),
+    );
+
+    await expect(saveTextAs("x", "x.txt", "text/plain")).rejects.toBe(
+      failure,
+    );
+  });
+});
+
+describe("pickTextFile", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns null when the open picker is unavailable", async () => {
+    vi.stubGlobal("showOpenFilePicker", undefined);
+
+    await expect(pickTextFile()).resolves.toBeNull();
+  });
+
+  it("returns null when the open picker is cancelled", async () => {
+    vi.stubGlobal(
+      "showOpenFilePicker",
+      vi.fn().mockRejectedValue(new DOMException("", "AbortError")),
+    );
+
+    await expect(pickTextFile()).resolves.toBeNull();
+  });
+
+  it("returns null when the open picker returns no handle", async () => {
+    vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([]));
+
+    await expect(pickTextFile()).resolves.toBeNull();
+  });
+
+  it("returns the selected text file together with its writable handle", async () => {
+    const file = new File(["0 0 10 10 person 0"], "picked.txt", {
+      type: "text/plain",
+    });
+    const handle = { getFile: vi.fn().mockResolvedValue(file) };
+    const showOpenFilePicker = vi.fn().mockResolvedValue([handle]);
+    vi.stubGlobal("showOpenFilePicker", showOpenFilePicker);
+
+    await expect(pickTextFile()).resolves.toEqual({ file, handle });
+    expect(showOpenFilePicker).toHaveBeenCalledWith({
+      multiple: false,
+      types: [
+        {
+          description: "Text files",
+          accept: { "text/plain": [".txt"] },
+        },
+      ],
+    });
+    expect(handle.getFile).toHaveBeenCalledOnce();
+  });
+
+  it("propagates non-abort open-picker failures", async () => {
+    const failure = new Error("picker failed");
+    vi.stubGlobal(
+      "showOpenFilePicker",
+      vi.fn().mockRejectedValue(failure),
+    );
+
+    await expect(pickTextFile()).rejects.toBe(failure);
+  });
+});
 
 describe("partitionDroppedFiles", () => {
   it("recognizes one image and one txt file regardless of drop order", () => {

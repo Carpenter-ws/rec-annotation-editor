@@ -1,11 +1,21 @@
-import { useRef, type ChangeEvent, type JSX } from "react";
+import { useRef, useState, type ChangeEvent, type JSX } from "react";
 
 export interface ToolbarProps {
   imageName: string | null;
   labelFileName: string | null;
+  dirty: boolean;
   scale: number;
   onOpenImage: (file: File) => void;
   onOpenLabels: (file: File) => void;
+  onPickLabels: () => void;
+  onSave: () => void;
+  onSaveAs: () => void;
+  undoDisabled: boolean;
+  redoDisabled: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onExportTxt: () => void;
+  onExportJson: () => void;
   onZoomOut: () => void;
   onZoomIn: () => void;
   onFit: () => void;
@@ -17,9 +27,19 @@ export interface ToolbarProps {
 export function Toolbar({
   imageName,
   labelFileName,
+  dirty,
   scale,
   onOpenImage,
   onOpenLabels,
+  onPickLabels,
+  onSave,
+  onSaveAs,
+  undoDisabled,
+  redoDisabled,
+  onUndo,
+  onRedo,
+  onExportTxt,
+  onExportJson,
   onZoomOut,
   onZoomIn,
   onFit,
@@ -29,6 +49,7 @@ export function Toolbar({
 }: ToolbarProps): JSX.Element {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const forwardFile = (
     event: ChangeEvent<HTMLInputElement>,
@@ -54,7 +75,16 @@ export function Toolbar({
           hidden
           onChange={(event) => forwardFile(event, onOpenImage)}
         />
-        <button type="button" onClick={() => labelInputRef.current?.click()}>
+        <button
+          type="button"
+          onClick={() => {
+            if (window.showOpenFilePicker) {
+              onPickLabels();
+              return;
+            }
+            labelInputRef.current?.click();
+          }}
+        >
           Open labels
         </button>
         <input
@@ -69,6 +99,55 @@ export function Toolbar({
       <div className="toolbar-file-names" aria-label="Open files">
         <span>{imageName ?? "No image"}</span>
         <span>{labelFileName ?? "No labels"}</span>
+        <span aria-label="Save status">
+          {dirty ? "Unsaved changes" : "Saved"}
+        </span>
+      </div>
+      <button type="button" onClick={onSave}>
+        Save
+      </button>
+      <button type="button" onClick={onSaveAs}>
+        Save As
+      </button>
+      <button type="button" disabled={undoDisabled} onClick={onUndo}>
+        Undo
+      </button>
+      <button type="button" disabled={redoDisabled} onClick={onRedo}>
+        Redo
+      </button>
+      <div className="export-controls">
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={exportOpen}
+          onClick={() => setExportOpen((open) => !open)}
+        >
+          Export
+        </button>
+        {exportOpen ? (
+          <div role="menu" aria-label="Export annotations">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setExportOpen(false);
+                onExportTxt();
+              }}
+            >
+              Export TXT
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setExportOpen(false);
+                onExportJson();
+              }}
+            >
+              Export JSON
+            </button>
+          </div>
+        ) : null}
       </div>
       <div className="zoom-controls" aria-label="Zoom controls">
         <button type="button" aria-label="Zoom out" onClick={onZoomOut}>
