@@ -1,0 +1,2 @@
+# Keep shell scripts runnable on POSIX systems no matter which OS checks them out.
+*.sh text eol=lf
