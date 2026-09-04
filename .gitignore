@@ -1,2 +1,10 @@
 .worktrees/
 .superpowers/
+node_modules/
+.npm-cache/
+dist/
+coverage/
+playwright-report/
+test-results/
+.playwright-browsers/
+*.local
