@@ -2533,6 +2533,205 @@ it("installs the beforeunload warning only while annotations are dirty", async (
   });
 });
 
+it("protects an uncommitted coordinate draft as an unsaved change", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  const addEventListener = vi.spyOn(window, "addEventListener");
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 30 40 person 0", "scene.txt"),
+  );
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  await user.click(x1);
+  fireEvent.change(x1, { target: { value: "12." } });
+
+  expect(x1).toHaveFocus();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+  let warningListener!: EventListener;
+  await waitFor(() => {
+    const call = addEventListener.mock.calls.find(
+      ([type]) => type === "beforeunload",
+    );
+    expect(call).toBeDefined();
+    warningListener = call![1] as EventListener;
+  });
+  const event = {
+    preventDefault: vi.fn(),
+    returnValue: "unchanged",
+  } as unknown as BeforeUnloadEvent;
+  warningListener(event);
+  expect(event.preventDefault).toHaveBeenCalledOnce();
+  expect(event.returnValue).toBe("");
+});
+
+it("clears effective dirty when an invalid coordinate draft resets on blur", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 30 40 person 0", "scene.txt"),
+  );
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  await user.click(x1);
+  fireEvent.change(x1, { target: { value: "-" } });
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  fireEvent.blur(x1);
+
+  expect(x1).toHaveValue("10");
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("clears the coordinate draft marker when a valid commit is saved", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+    () => undefined,
+  );
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 30 40 person 0", "scene.txt"),
+  );
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  await user.click(x1);
+  fireEvent.change(x1, { target: { value: "12" } });
+  fireEvent.blur(x1);
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("clears effective dirty when a focused coordinate draft is reverted", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 30 40 person 0", "scene.txt"),
+  );
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  await user.click(x1);
+  fireEvent.change(x1, { target: { value: "12" } });
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  fireEvent.change(x1, { target: { value: "10" } });
+
+  expect(x1).toHaveFocus();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("removes a stale coordinate draft when an import unmounts its card", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(
+      "10 20 30 40 person 0\n40 20 60 40 bicycle 0",
+      "scene.txt",
+    ),
+  );
+  const secondX1 = (await screen.findAllByRole("textbox", { name: "X1" }))[1]!;
+  await user.click(secondX1);
+  fireEvent.change(secondX1, { target: { value: "-" } });
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  fireEvent.drop(screen.getByRole("region", { name: "Image workspace" }), {
+    dataTransfer: {
+      files: [textFile("12 22 32 42 car 0", "replacement.txt")],
+    },
+  });
+
+  await waitFor(() => {
+    expect(screen.getByLabelText("Total annotations")).toHaveTextContent(
+      "1 annotation",
+    );
+  });
+  expect(secondX1).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("resets a focused coordinate draft before a same-ID label import", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 100, height: 80 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 30 40 person 0", "scene.txt"),
+  );
+  const x1 = await screen.findByRole("textbox", { name: "X1" });
+  await user.click(x1);
+  fireEvent.change(x1, { target: { value: "-" } });
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  fireEvent.drop(screen.getByRole("region", { name: "Image workspace" }), {
+    dataTransfer: {
+      files: [textFile("12 22 32 42 car 0", "replacement.txt")],
+    },
+  });
+
+  await waitFor(() => expect(x1).toHaveValue("12"));
+  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
+    "car",
+  );
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
 it("keeps the search field focused while its global Save shortcut runs", async () => {
   const user = userEvent.setup();
   const { blobs, click } = mockDownloadEnvironment();
@@ -2563,22 +2762,31 @@ it("keeps the search field focused while its global Save shortcut runs", async (
   );
 });
 
-it("keeps concurrent Save completions from cleaning edits made after the newest save", async () => {
+it("commits the newest concurrent Save snapshot last and reports it saved", async () => {
   const user = userEvent.setup();
-  const firstWrite = deferred<void>();
-  const secondWrite = deferred<void>();
-  const write = vi
-    .fn()
-    .mockImplementationOnce(() => firstWrite.promise)
-    .mockImplementationOnce(() => secondWrite.promise);
+  const firstClose = deferred<void>();
+  const secondClose = deferred<void>();
+  let diskContents = "";
+  const writable = (closeGate: Promise<void>) => {
+    let stagedContents = "";
+    return {
+      write: vi.fn(async (contents: FileSystemWriteChunkType) => {
+        stagedContents = String(contents);
+      }),
+      close: vi.fn(async () => {
+        await closeGate;
+        diskContents = stagedContents;
+      }),
+    };
+  };
   const handle = {
     getFile: vi
       .fn()
       .mockResolvedValue(textFile("0 0 10 10 person 0", "scene.txt")),
-    createWritable: vi.fn().mockResolvedValue({
-      write,
-      close: vi.fn().mockResolvedValue(undefined),
-    }),
+    createWritable: vi
+      .fn()
+      .mockResolvedValueOnce(writable(firstClose.promise))
+      .mockResolvedValueOnce(writable(secondClose.promise)),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
   render(<App />);
@@ -2590,35 +2798,24 @@ it("keeps concurrent Save completions from cleaning edits made after the newest 
   await user.type(expression, " first");
   fireEvent.blur(expression);
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
-  await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(handle.createWritable).toHaveBeenCalledTimes(1));
 
   await user.click(expression);
   await user.type(expression, " second");
   fireEvent.blur(expression);
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
-  await waitFor(() => expect(write).toHaveBeenCalledTimes(2));
 
-  await settleDeferred(() => secondWrite.resolve());
+  await settleDeferred(() => secondClose.resolve());
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  await settleDeferred(() => firstClose.resolve());
+
   await waitFor(() => {
+    expect(diskContents).toBe(
+      "0.00 0.00 10.00 10.00 person first second 0\n",
+    );
     expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
   });
-  await user.click(expression);
-  await user.type(expression, " third");
-  fireEvent.blur(expression);
-  expect(screen.getByLabelText("Save status")).toHaveTextContent(
-    "Unsaved changes",
-  );
-
-  await settleDeferred(() => firstWrite.resolve());
-
-  expect(write.mock.calls.map(([contents]) => contents)).toEqual([
-    "0.00 0.00 10.00 10.00 person first 0\n",
-    "0.00 0.00 10.00 10.00 person first second 0\n",
-  ]);
-  expect(expression).toHaveValue("person first second third");
-  expect(screen.getByLabelText("Save status")).toHaveTextContent(
-    "Unsaved changes",
-  );
+  expect(expression).toHaveValue("person first second");
 });
 
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {

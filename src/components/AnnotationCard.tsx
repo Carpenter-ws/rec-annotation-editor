@@ -37,6 +37,7 @@ export interface AnnotationCardProps {
   onSelect: (id: string) => void;
   onLocate: (id: string) => void;
   onExpressionEditingChange: (id: string | null) => void;
+  onCoordinateDraftChange?: (id: string, pending: boolean) => void;
 }
 
 export const AnnotationCard = memo(function AnnotationCard({
@@ -48,6 +49,7 @@ export const AnnotationCard = memo(function AnnotationCard({
   onSelect,
   onLocate,
   onExpressionEditingChange,
+  onCoordinateDraftChange,
 }: AnnotationCardProps): JSX.Element {
   const [expression, setExpression] = useState(annotation.label);
   const [expressionError, setExpressionError] = useState<string | null>(null);
@@ -140,22 +142,26 @@ export const AnnotationCard = memo(function AnnotationCard({
     ) {
       setCoordinateError("All coordinates must be finite numbers.");
       setCoordinates(bboxStrings(legalBBoxRef.current));
+      onCoordinateDraftChange?.(annotation.id, false);
       return;
     }
     const bbox = clampBBox(parsed, bounds);
     if (bbox.x2 <= bbox.x1) {
       setCoordinateError("X2 must be greater than X1.");
       setCoordinates(bboxStrings(legalBBoxRef.current));
+      onCoordinateDraftChange?.(annotation.id, false);
       return;
     }
     if (bbox.y2 <= bbox.y1) {
       setCoordinateError("Y2 must be greater than Y1.");
       setCoordinates(bboxStrings(legalBBoxRef.current));
+      onCoordinateDraftChange?.(annotation.id, false);
       return;
     }
     setCoordinateError(null);
     legalBBoxRef.current = bbox;
     setCoordinates(bboxStrings(bbox));
+    onCoordinateDraftChange?.(annotation.id, false);
     dispatch({
       type: "UPDATE_ANNOTATION",
       id: annotation.id,
@@ -243,11 +249,19 @@ export const AnnotationCard = memo(function AnnotationCard({
               }}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                setCoordinateError(null);
-                setCoordinates((current) => ({
-                  ...current,
+                const nextCoordinates = {
+                  ...coordinates,
                   [coordinate]: value,
-                }));
+                };
+                const legalCoordinates = bboxStrings(legalBBoxRef.current);
+                setCoordinateError(null);
+                setCoordinates(nextCoordinates);
+                onCoordinateDraftChange?.(
+                  annotation.id,
+                  (Object.keys(coordinateLabels) as Coordinate[]).some(
+                    (name) => nextCoordinates[name] !== legalCoordinates[name],
+                  ),
+                );
               }}
               onBlur={() => {
                 if (activeCoordinateRef.current !== coordinate) return;

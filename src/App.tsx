@@ -138,6 +138,9 @@ function EditorWorkspace(): JSX.Element {
   const [errorReport, setErrorReport] = useState<ErrorReport | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
   const [draftBBox, setDraftBBox] = useState<BBox | null>(null);
+  const [pendingCoordinateIds, setPendingCoordinateIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const viewportRef = useRef<ViewportHandle>(null);
   const stateRef = useRef(state);
   const importGenerationRef = useRef(0);
@@ -147,7 +150,8 @@ function EditorWorkspace(): JSX.Element {
   const labelHandleRef = useRef<FileSystemFileHandle | null>(null);
   const pendingCenterIdRef = useRef<string | null>(null);
   stateRef.current = state;
-  useUnsavedWarning(state.dirty);
+  const effectiveDirty = state.dirty || pendingCoordinateIds.size > 0;
+  useUnsavedWarning(effectiveDirty);
   const imageBounds = useMemo<ImageBounds | null>(
     () =>
       state.image
@@ -158,6 +162,18 @@ function EditorWorkspace(): JSX.Element {
   const locateAnnotation = useCallback((id: string) => {
     viewportRef.current?.centerAnnotation(id);
   }, []);
+  const handleCoordinateDraftChange = useCallback(
+    (id: string, pending: boolean) => {
+      setPendingCoordinateIds((current) => {
+        if (pending ? current.has(id) : !current.has(id)) return current;
+        const next = new Set(current);
+        if (pending) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -184,6 +200,16 @@ function EditorWorkspace(): JSX.Element {
     pendingCenterIdRef.current = null;
   }, [state.annotations, state.selectedId]);
 
+  useEffect(() => {
+    const annotationIds = new Set(
+      state.annotations.map((annotation) => annotation.id),
+    );
+    setPendingCoordinateIds((current) => {
+      if ([...current].every((id) => annotationIds.has(id))) return current;
+      return new Set([...current].filter((id) => annotationIds.has(id)));
+    });
+  }, [state.annotations]);
+
   const importFiles = async (
     files: ImportFiles,
     rejected: readonly File[] = [],
@@ -191,6 +217,14 @@ function EditorWorkspace(): JSX.Element {
     requestedGeneration?: number,
   ): Promise<void> => {
     if (files.image || files.labels) {
+      const activeElement = document.activeElement;
+      if (
+        isEditableTarget(activeElement) &&
+        activeElement instanceof HTMLElement &&
+        activeElement.closest("[data-annotation-id]")
+      ) {
+        activeElement.blur();
+      }
       setDraftBBox(null);
       pendingCenterIdRef.current = null;
       dispatch({ type: "SET_MODE", mode: "select" });
@@ -487,7 +521,7 @@ function EditorWorkspace(): JSX.Element {
       <Toolbar
         imageName={state.image?.name ?? null}
         labelFileName={state.labelFileName}
-        dirty={state.dirty}
+        dirty={effectiveDirty}
         scale={zoomScale}
         onOpenImage={(file) => void importFiles({ image: file })}
         onOpenLabels={(file) => void importFiles({ labels: file })}
@@ -563,6 +597,7 @@ function EditorWorkspace(): JSX.Element {
             bounds={imageBounds}
             dispatch={dispatch}
             onLocate={locateAnnotation}
+            onCoordinateDraftChange={handleCoordinateDraftChange}
           />
         </aside>
       </main>

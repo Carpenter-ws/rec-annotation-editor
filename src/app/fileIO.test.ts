@@ -17,6 +17,16 @@ function readBlob(blob: Blob): Promise<string> {
   });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("downloadText", () => {
   const OriginalURL = globalThis.URL;
 
@@ -97,6 +107,87 @@ describe("writeTextToHandle", () => {
     expect(write).toHaveBeenCalledWith("annotation text");
     expect(close).toHaveBeenCalledOnce();
   });
+
+  it("commits the newest requested snapshot last for one retained handle", async () => {
+    const firstClose = deferred<void>();
+    const secondClose = deferred<void>();
+    let diskContents = "";
+    const writable = (closeGate: Promise<void>) => {
+      let stagedContents = "";
+      return {
+        write: vi.fn(async (contents: FileSystemWriteChunkType) => {
+          stagedContents = String(contents);
+        }),
+        close: vi.fn(async () => {
+          await closeGate;
+          diskContents = stagedContents;
+        }),
+      };
+    };
+    const handle = {
+      createWritable: vi
+        .fn()
+        .mockResolvedValueOnce(writable(firstClose.promise))
+        .mockResolvedValueOnce(writable(secondClose.promise)),
+    };
+
+    const saveA = writeTextToHandle(
+      handle as unknown as FileSystemFileHandle,
+      "snapshot A",
+    );
+    const saveB = writeTextToHandle(
+      handle as unknown as FileSystemFileHandle,
+      "snapshot B",
+    );
+
+    secondClose.resolve();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    firstClose.resolve();
+    await Promise.all([saveA, saveB]);
+
+    expect(diskContents).toBe("snapshot B");
+  });
+
+  it.each(["write", "close"] as const)(
+    "continues the retained-handle queue after a %s rejection",
+    async (failureStage) => {
+      const failure = new Error(`${failureStage} failed`);
+      let diskContents = "";
+      const handle = {
+        createWritable: vi
+          .fn()
+          .mockResolvedValueOnce({
+            write:
+              failureStage === "write"
+                ? vi.fn().mockRejectedValue(failure)
+                : vi.fn().mockResolvedValue(undefined),
+            close:
+              failureStage === "close"
+                ? vi.fn().mockRejectedValue(failure)
+                : vi.fn().mockResolvedValue(undefined),
+          })
+          .mockResolvedValueOnce({
+            write: vi.fn(async (contents: FileSystemWriteChunkType) => {
+              diskContents = String(contents);
+            }),
+            close: vi.fn().mockResolvedValue(undefined),
+          }),
+      };
+
+      const failedSave = writeTextToHandle(
+        handle as unknown as FileSystemFileHandle,
+        "snapshot A",
+      );
+      const recoveredSave = writeTextToHandle(
+        handle as unknown as FileSystemFileHandle,
+        "snapshot B",
+      );
+
+      await expect(failedSave).rejects.toBe(failure);
+      await expect(recoveredSave).resolves.toBeUndefined();
+      expect(diskContents).toBe("snapshot B");
+    },
+  );
 });
 
 describe("saveTextAs", () => {

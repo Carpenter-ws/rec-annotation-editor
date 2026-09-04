@@ -8,6 +8,8 @@ export interface DroppedFiles {
 
 export type SaveResult = "saved" | "cancelled" | "downloaded";
 
+const pendingHandleWrites = new WeakMap<FileSystemFileHandle, Promise<void>>();
+
 const IMAGE_EXTENSION =
   /\.(?:apng|avif|bmp|gif|heic|heif|ico|jfif|jpe?g|png|svg|tiff?|webp)$/i;
 
@@ -38,13 +40,37 @@ export function downloadText(
   }
 }
 
-export async function writeTextToHandle(
+async function commitTextToHandle(
   handle: FileSystemFileHandle,
   contents: string,
 ): Promise<void> {
   const writable = await handle.createWritable();
   await writable.write(contents);
   await writable.close();
+}
+
+export function writeTextToHandle(
+  handle: FileSystemFileHandle,
+  contents: string,
+): Promise<void> {
+  const previous = pendingHandleWrites.get(handle) ?? Promise.resolve();
+  const pending = previous
+    .catch(() => undefined)
+    .then(() => commitTextToHandle(handle, contents));
+  pendingHandleWrites.set(handle, pending);
+  void pending.then(
+    () => {
+      if (pendingHandleWrites.get(handle) === pending) {
+        pendingHandleWrites.delete(handle);
+      }
+    },
+    () => {
+      if (pendingHandleWrites.get(handle) === pending) {
+        pendingHandleWrites.delete(handle);
+      }
+    },
+  );
+  return pending;
 }
 
 export async function saveTextAs(

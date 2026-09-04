@@ -17,6 +17,7 @@ export interface AnnotationPanelProps {
   bounds: ImageBounds | null;
   dispatch: Dispatch<EditorAction>;
   onLocate: (id: string) => void;
+  onCoordinateDraftChange?: (id: string, pending: boolean) => void;
 }
 
 export function AnnotationPanel({
@@ -25,6 +26,7 @@ export function AnnotationPanel({
   bounds,
   dispatch,
   onLocate,
+  onCoordinateDraftChange,
 }: AnnotationPanelProps): JSX.Element {
   const [query, setQuery] = useState("");
   const [activeExpressionId, setActiveExpressionId] = useState<string | null>(
@@ -105,6 +107,7 @@ export function AnnotationPanel({
             onSelect={selectAnnotation}
             onLocate={onLocate}
             onExpressionEditingChange={handleExpressionEditingChange}
+            onCoordinateDraftChange={onCoordinateDraftChange}
           />
         ))}
       </div>
