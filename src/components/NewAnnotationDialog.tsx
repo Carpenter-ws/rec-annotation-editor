@@ -25,37 +25,40 @@ export function NewAnnotationDialog({
 
   return (
     <div
+      className="new-annotation-dialog"
       role="dialog"
       aria-labelledby="new-annotation-title"
       aria-modal="true"
     >
-      <h2 id="new-annotation-title">New annotation</h2>
-      <label>
-        Expression
-        <input
-          type="text"
-          autoFocus
-          value={label}
-          onChange={(event) => setLabel(event.currentTarget.value)}
-        />
-      </label>
-      {error ? <p role="alert">{error}</p> : null}
       <div>
-        <button type="button" onClick={onCancel}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (label.trim().length === 0) {
-              setError("Expression cannot be empty.");
-              return;
-            }
-            onAdd(label.trim());
-          }}
-        >
-          Add
-        </button>
+        <h2 id="new-annotation-title">New annotation</h2>
+        <label>
+          Expression
+          <input
+            type="text"
+            autoFocus
+            value={label}
+            onChange={(event) => setLabel(event.currentTarget.value)}
+          />
+        </label>
+        {error ? <p role="alert">{error}</p> : null}
+        <div>
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (label.trim().length === 0) {
+                setError("Expression cannot be empty.");
+                return;
+              }
+              onAdd(label.trim());
+            }}
+          >
+            Add
+          </button>
+        </div>
       </div>
     </div>
   );

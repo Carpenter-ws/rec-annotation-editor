@@ -537,7 +537,9 @@ it("deletes the exact card without bubbling into selection or locate", async () 
     />,
   );
 
-  await user.click(screen.getAllByRole("button", { name: "Delete" })[1]!);
+  await user.click(
+    screen.getAllByRole("button", { name: "Delete annotation" })[1]!,
+  );
 
   expect(dispatch.mock.calls).toEqual([
     [{ type: "DELETE_ANNOTATION", id: "duplicate/id" }],

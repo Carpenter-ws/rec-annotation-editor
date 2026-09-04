@@ -165,32 +165,36 @@ function AnnotationBox({
         vectorEffect="non-scaling-stroke"
       />
       <rect
+        className={selected ? "annotation-bbox is-selected" : "annotation-bbox"}
         data-testid={`bbox-${annotation.id}`}
+        data-selected={selected ? "true" : "false"}
         x={x1}
         y={y1}
         width={width}
         height={height}
-        fill="none"
-        stroke={selected ? "#facc15" : "#22d3ee"}
-        strokeWidth={selected ? 2 : 1.5}
         vectorEffect="non-scaling-stroke"
       />
       {selected ? (
         <>
-          <text x={x1} y={y1} dy={-6 / scale} fontSize={14 / scale}>
+          <text
+            className="annotation-label-text"
+            x={x1}
+            y={y1}
+            dy={-6 / scale}
+            fontSize={14 / scale}
+            strokeWidth={3 / scale}
+          >
             {annotation.label}
           </text>
           {handles.map(([handle, center]) => (
             <rect
               key={handle}
+              className="annotation-handle"
               data-testid={`handle-${handle}`}
               x={center.x - handleSize / 2}
               y={center.y - handleSize / 2}
               width={handleSize}
               height={handleSize}
-              fill="#facc15"
-              stroke="#111827"
-              strokeWidth={1}
               vectorEffect="non-scaling-stroke"
               onPointerDown={(event) => onResizePointerDown(event, handle)}
             />
@@ -676,15 +680,12 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         ))}
         {draftBBox ? (
           <rect
+            className="draft-box"
             data-testid="draft-box"
             x={draftBBox.x1}
             y={draftBBox.y1}
             width={draftBBox.x2 - draftBBox.x1}
             height={draftBBox.y2 - draftBBox.y1}
-            fill="none"
-            stroke="#facc15"
-            strokeWidth={2}
-            strokeDasharray="6 4"
             vectorEffect="non-scaling-stroke"
             pointerEvents="none"
           />

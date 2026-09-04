@@ -22,6 +22,9 @@ export interface ToolbarProps {
   mode: "select" | "add";
   addBoxDisabled: boolean;
   onAddBox: () => void;
+  panelToggleVisible: boolean;
+  panelOpen: boolean;
+  onTogglePanel: () => void;
 }
 
 export function Toolbar({
@@ -46,6 +49,9 @@ export function Toolbar({
   mode,
   addBoxDisabled,
   onAddBox,
+  panelToggleVisible,
+  panelOpen,
+  onTogglePanel,
 }: ToolbarProps): JSX.Element {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
@@ -169,8 +175,19 @@ export function Toolbar({
         disabled={addBoxDisabled}
         onClick={onAddBox}
       >
-        Add Box
+        Add box
       </button>
+      {panelToggleVisible ? (
+        <button
+          type="button"
+          className="panel-toggle"
+          aria-expanded={panelOpen}
+          aria-controls="annotation-panel"
+          onClick={onTogglePanel}
+        >
+          Annotations
+        </button>
+      ) : null}
     </header>
   );
 }

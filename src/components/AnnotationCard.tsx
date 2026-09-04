@@ -173,6 +173,7 @@ export const AnnotationCard = memo(function AnnotationCard({
     <article
       className={selected ? "annotation-card is-selected" : "annotation-card"}
       data-annotation-id={annotation.id}
+      data-annotation-label={annotation.label}
       aria-current={selected ? "true" : undefined}
       onClick={() => {
         onSelect(annotation.id);
@@ -182,10 +183,12 @@ export const AnnotationCard = memo(function AnnotationCard({
       <header>
         <div>
           <strong>Annotation {index}</strong>
-          <span>{annotation.label}</span>
+          <span className="annotation-id">{annotation.id}</span>
+          <span className="annotation-expression">{annotation.label}</span>
         </div>
         <button
           type="button"
+          aria-label="Delete annotation"
           onClick={(event) => {
             event.stopPropagation();
             dispatch({ type: "DELETE_ANNOTATION", id: annotation.id });

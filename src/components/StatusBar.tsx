@@ -23,7 +23,9 @@ export function StatusBar({
         {annotationCount} {annotationCount === 1 ? "annotation" : "annotations"}
       </span>
       {image ? <span>Zoom {Math.round(scale * 100)}%</span> : null}
-      {notice ? <span>{notice}</span> : null}
+      <span className="status-notice" aria-live="polite" data-testid="editor-notice">
+        {notice}
+      </span>
     </footer>
   );
 }

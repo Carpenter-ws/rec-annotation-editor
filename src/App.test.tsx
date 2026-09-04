@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   act,
   cleanup,
@@ -5,10 +7,30 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
+import { parseAnnotationText } from "./domain/parser";
 import * as editorReducerModule from "./state/editorReducer";
+import { makeStressAnnotations } from "../tests/fixtures/makeStressAnnotations";
+
+const exampleFixture = (name: string) =>
+  path.resolve(process.cwd(), "public/examples", name);
+
+function mockNarrowLayout(matches: boolean): void {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+}
 
 interface DecodedImage {
   width: number;
@@ -245,7 +267,7 @@ it("enters Add Box mode from the toolbar after an image loads", async () => {
   );
   expect(await screen.findByText("400 × 300")).toBeVisible();
 
-  const addBox = screen.getByRole("button", { name: "Add Box" });
+  const addBox = screen.getByRole("button", { name: "Add box" });
   expect(addBox).toBeEnabled();
   expect(addBox).toHaveAttribute("aria-pressed", "false");
 
@@ -266,7 +288,7 @@ it("opens a focused new-annotation dialog after drawing a box", async () => {
     new File(["pixels"], "scene.png", { type: "image/png" }),
   );
   expect(await screen.findByText("400 × 300")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  await user.click(screen.getByRole("button", { name: "Add box" }));
 
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
@@ -310,7 +332,7 @@ it("rejects an empty trimmed expression in the new-annotation dialog", async () 
     new File(["pixels"], "scene.png", { type: "image/png" }),
   );
   expect(await screen.findByText("400 × 300")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  await user.click(screen.getByRole("button", { name: "Add box" }));
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
     setPointerCapture: vi.fn(),
@@ -357,7 +379,7 @@ it("adds, selects, and centers a trimmed original-coordinate annotation", async 
     new File(["pixels"], "square.png", { type: "image/png" }),
   );
   expect(await screen.findByText("1000 × 1000")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  await user.click(screen.getByRole("button", { name: "Add box" }));
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
     setPointerCapture: vi.fn(),
@@ -396,7 +418,7 @@ it("adds, selects, and centers a trimmed original-coordinate annotation", async 
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("width", "100");
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("height", "100");
   expect(screen.getByTestId("handle-nw")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Add Box" })).toHaveAttribute(
+  expect(screen.getByRole("button", { name: "Add box" })).toHaveAttribute(
     "aria-pressed",
     "false",
   );
@@ -451,7 +473,7 @@ it("uses the reducer next annotation number after importing annotations", async 
     textFile("10 10 20 20 first 0\n30 30 40 40 second 0"),
   );
   expect(await screen.findByText("2 annotations")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  await user.click(screen.getByRole("button", { name: "Add box" }));
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
     setPointerCapture: vi.fn(),
@@ -506,7 +528,7 @@ it("discards a new annotation draft with Cancel", async () => {
     new File(["pixels"], "scene.png", { type: "image/png" }),
   );
   expect(await screen.findByText("400 × 300")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Add Box" }));
+  await user.click(screen.getByRole("button", { name: "Add box" }));
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
     setPointerCapture: vi.fn(),
@@ -538,7 +560,7 @@ it("discards a new annotation draft with Cancel", async () => {
 
   expect(screen.queryByRole("dialog", { name: "New annotation" })).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
-  expect(screen.getByRole("button", { name: "Add Box" })).toHaveAttribute(
+  expect(screen.getByRole("button", { name: "Add box" })).toHaveAttribute(
     "aria-pressed",
     "false",
   );
@@ -562,7 +584,7 @@ it.each(["dialog", "background"] as const)(
       new File(["pixels"], "scene.png", { type: "image/png" }),
     );
     expect(await screen.findByText("400 × 300")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Add Box" }));
+    await user.click(screen.getByRole("button", { name: "Add box" }));
     const canvas = screen.getByLabelText("Annotation canvas");
     Object.assign(canvas, {
       setPointerCapture: vi.fn(),
@@ -631,7 +653,7 @@ it.each(["image", "labels"] as const)(
     await settleDeferred(() => images[0]!.succeed(400, 300));
     expect(await screen.findByText("400 × 300")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Add Box" }));
+    await user.click(screen.getByRole("button", { name: "Add box" }));
     const canvas = screen.getByLabelText("Annotation canvas");
     Object.assign(canvas, {
       setPointerCapture: vi.fn(),
@@ -674,7 +696,7 @@ it.each(["image", "labels"] as const)(
       screen.queryByRole("dialog", { name: "New annotation" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add Box" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Add box" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
@@ -2818,6 +2840,218 @@ it("commits the newest concurrent Save snapshot last and reports it saved", asyn
   expect(expression).toHaveValue("person first second");
 });
 
+it("exposes named workspace, annotation panel, status and mode controls", () => {
+  render(<App />);
+
+  expect(screen.getByRole("region", { name: "Image workspace" })).toBeVisible();
+  expect(
+    screen.getByRole("complementary", { name: "Annotations" }),
+  ).toBeVisible();
+  expect(screen.getByRole("status")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Add box" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+it("reports clamped imported boxes without losing valid annotations", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 1920, height: 1080 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("1900 100 2000 200 edge car 0"),
+  );
+
+  expect(
+    await screen.findByText("Clamped 1 bounding box to the image bounds."),
+  ).toBeVisible();
+  expect(screen.getByLabelText("X2")).toHaveValue("1920");
+  expect(screen.getByLabelText("X1")).toHaveValue("1900");
+});
+
+it("announces notices through a polite live region", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 1920, height: 1080 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 2000 200 edge box 0"),
+  );
+
+  const notice = await screen.findByText(
+    "Clamped 1 bounding box to the image bounds.",
+  );
+  expect(notice).toHaveAttribute("aria-live", "polite");
+});
+
+it("offers deterministic example image and label downloads from the empty state", () => {
+  render(<App />);
+
+  expect(screen.getByRole("link", { name: "Example image" })).toHaveAttribute(
+    "href",
+    "/examples/rec-aerial-scene.svg",
+  );
+  expect(screen.getByRole("link", { name: "Example labels" })).toHaveAttribute(
+    "href",
+    "/examples/rec-aerial-scene.txt",
+  );
+});
+
+it("ships 24-line example fixtures that parse inside a 1920x1080 image", async () => {
+  const [labels, image] = await Promise.all([
+    readFile(exampleFixture("rec-aerial-scene.txt"), "utf8"),
+    readFile(exampleFixture("rec-aerial-scene.svg"), "utf8"),
+  ]);
+  const lines = labels.split("\n").filter((line) => line.trim().length > 0);
+  expect(lines).toHaveLength(24);
+
+  const parsed = parseAnnotationText(labels);
+  expect(parsed.issues).toEqual([]);
+  expect(parsed.annotations).toHaveLength(24);
+  expect(
+    parsed.annotations.filter((annotation) => annotation.label === "person"),
+  ).toHaveLength(2);
+  expect(parsed.annotations[0]?.id).toBe("ann_001");
+  expect(parsed.annotations[1]?.id).toBe("ann_002");
+  expect(
+    parsed.annotations.every(
+      (annotation) =>
+        annotation.bbox.x1 >= 0 &&
+        annotation.bbox.y1 >= 0 &&
+        annotation.bbox.x2 <= 1920 &&
+        annotation.bbox.y2 <= 1080,
+    ),
+  ).toBe(true);
+  expect(image).toContain('width="1920"');
+  expect(image).toContain('height="1080"');
+});
+
+it("focuses the error dialog and restores focus to the triggering control", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  const trigger = screen.getByRole("button", { name: /^Save$/ });
+  trigger.focus();
+  fireEvent.drop(screen.getByRole("region", { name: "Image workspace" }), {
+    dataTransfer: { files: [textFile("not a bounding box\n")] },
+  });
+
+  const close = await screen.findByRole("button", { name: "Close error" });
+  expect(close).toHaveFocus();
+
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(trigger).toHaveFocus();
+});
+
+it("keeps keyboard focus inside the error dialog while it is open", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 10 5 5 broken 0\n"),
+  );
+  const close = await screen.findByRole("button", { name: "Close error" });
+  expect(close).toHaveFocus();
+
+  await user.tab();
+  expect(close).toHaveFocus();
+  await user.tab({ shift: true });
+  expect(close).toHaveFocus();
+});
+
+it("shows a recoverable fatal error screen when the editor throws", () => {
+  const consoleError = vi
+    .spyOn(console, "error")
+    .mockImplementation(() => undefined);
+  function ExplodingChild(): JSX.Element {
+    throw new Error("editor crashed");
+  }
+
+  render(
+    <EditorErrorBoundary>
+      <ExplodingChild />
+    </EditorErrorBoundary>,
+  );
+
+  expect(
+    screen.getByRole("heading", { name: "The editor hit an unexpected error" }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Reload editor" }),
+  ).toBeVisible();
+  expect(consoleError).toHaveBeenCalled();
+  consoleError.mockRestore();
+});
+
+it("collapses the annotation panel into an explicit drawer on narrow screens", async () => {
+  const user = userEvent.setup();
+  mockNarrowLayout(true);
+  render(<App />);
+
+  const toggle = screen.getByRole("button", { name: "Annotations" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByLabelText("Annotations")).not.toBeVisible();
+
+  await user.click(toggle);
+
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(
+    screen.getByRole("complementary", { name: "Annotations" }),
+  ).toBeVisible();
+});
+
+it("keeps the annotation panel open without a drawer toggle on wide screens", () => {
+  mockNarrowLayout(false);
+  render(<App />);
+
+  expect(
+    screen.getByRole("complementary", { name: "Annotations" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Annotations" }),
+  ).not.toBeInTheDocument();
+});
+
+it("searches and selects one annotation in a 500-box document", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(makeStressAnnotations(500), "stress.txt"),
+  );
+
+  const panel = screen.getByRole("complementary", { name: "Annotations" });
+  expect(screen.getByLabelText("Total annotations")).toHaveTextContent(
+    "500 annotations",
+  );
+
+  await user.type(
+    screen.getByPlaceholderText("Search expressions..."),
+    "target 417",
+  );
+  await user.click(within(panel).getByText("target 417", { exact: true }));
+
+  expect(within(panel).getByText("ann_417", { exact: true })).toBeVisible();
+}, 60000);
+
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
@@ -2829,7 +3063,7 @@ it("leaves Add Box mode once when Escape is pressed before a draft exists", asyn
     screen.getByLabelText("Open image"),
     new File(["pixels"], "scene.png", { type: "image/png" }),
   );
-  const addBox = screen.getByRole("button", { name: "Add Box" });
+  const addBox = screen.getByRole("button", { name: "Add box" });
   await user.click(addBox);
   expect(addBox).toHaveAttribute("aria-pressed", "true");
   reducer.mockClear();

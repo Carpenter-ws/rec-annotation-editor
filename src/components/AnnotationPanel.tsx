@@ -76,12 +76,13 @@ export function AnnotationPanel({
   }, [selectedId]);
 
   return (
-    <div ref={panelRef} className="annotation-panel">
-      <label>
+    <div ref={panelRef} id="annotation-panel" className="annotation-panel">
+      <label className="annotation-search">
         Search annotations
         <input
           type="search"
           value={query}
+          placeholder="Search expressions..."
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
       </label>

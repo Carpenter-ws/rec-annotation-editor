@@ -1,3 +1,29 @@
+:root {
+  --workspace: #151a21;
+  --workspace-raised: #1d242d;
+  --panel: #f7f8fa;
+  --panel-muted: #eef1f4;
+  --border: #d8dee5;
+  --text: #17202a;
+  --text-muted: #66717f;
+  --accent: #0ea5b7;
+  --accent-strong: #087f91;
+  --warning: #d89216;
+  --danger: #c53d4a;
+  --selection: #facc15;
+  --focus: 0 0 0 3px rgb(14 165 183 / 28%);
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --radius-sm: 10px;
+  --radius-lg: 14px;
+  --panel-width: 380px;
+  --shadow-panel: 0 10px 30px rgb(15 23 32 / 18%);
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -13,8 +39,539 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  font-family: var(--font-ui);
+  color: var(--text);
+  background: var(--panel);
 }
 
 button {
   font: inherit;
+}
+
+button,
+a,
+input,
+[role="menuitem"] {
+  border-radius: var(--radius-sm);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 100vh;
+}
+
+/* Toolbar */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--workspace-raised);
+  color: #f4f7fa;
+  border-bottom: 1px solid #0c1116;
+}
+
+.toolbar h1 {
+  margin: 0 var(--space-md) 0 0;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+
+.toolbar button {
+  padding: 6px 12px;
+  color: inherit;
+  background: #26303b;
+  border: 1px solid #35414f;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: #2f3b48;
+  border-color: #455363;
+}
+
+.toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.toolbar button[aria-pressed="true"] {
+  background: var(--accent-strong);
+  border-color: var(--accent);
+}
+
+.toolbar-files,
+.zoom-controls,
+.export-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.zoom-controls {
+  padding: 2px;
+  background: #212a34;
+  border: 1px solid #35414f;
+}
+
+.zoom-controls output {
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.export-controls [role="menu"] {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: var(--space-xs);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-panel);
+}
+
+.export-controls [role="menuitem"] {
+  padding: 8px 10px;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.export-controls [role="menuitem"]:hover {
+  background: var(--panel-muted);
+}
+
+.toolbar-file-names {
+  display: flex;
+  gap: var(--space-md);
+  min-width: 0;
+  margin-left: auto;
+  font-size: 12px;
+  color: #a9b6c4;
+}
+
+.toolbar-file-names span {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Layout */
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--panel-width);
+  min-height: 0;
+  flex: 1;
+  position: relative;
+}
+
+.image-workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--workspace);
+}
+
+.image-workspace.is-drag-active {
+  outline: 3px dashed var(--accent);
+  outline-offset: -12px;
+}
+
+.workspace-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  color: #93a2b1;
+  text-align: center;
+}
+
+.workspace-empty p {
+  margin: 0;
+}
+
+.workspace-examples a {
+  color: var(--accent);
+}
+
+.viewport-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.annotation-bbox {
+  fill: rgb(34 211 238 / 8%);
+  stroke: #22d3ee;
+  stroke-width: 1.5;
+}
+
+.annotation-bbox:hover {
+  stroke: #67e8f9;
+}
+
+.annotation-bbox.is-selected {
+  fill: rgb(250 204 21 / 12%);
+  stroke: var(--selection);
+  stroke-width: 2;
+}
+
+.annotation-handle {
+  fill: var(--selection);
+  stroke: #111827;
+  stroke-width: 1;
+  cursor: nwse-resize;
+}
+
+.annotation-label-text {
+  fill: var(--selection);
+  paint-order: stroke;
+  stroke: #0b0f14;
+  font-family: var(--font-ui);
+  pointer-events: none;
+}
+
+.draft-box {
+  fill: none;
+  stroke: var(--selection);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+/* Annotation panel */
+
+.annotation-side {
+  min-height: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.annotation-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  overflow-y: auto;
+}
+
+.annotation-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.annotation-panel input[type="search"] {
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.annotation-panel > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.annotation-panel > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.annotation-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-left: 4px solid transparent;
+  border-radius: var(--radius-lg);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.annotation-card:hover {
+  box-shadow: 0 2px 8px rgb(15 23 32 / 8%);
+}
+
+.annotation-card.is-selected {
+  border-left-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.annotation-card header {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.annotation-card header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.annotation-card strong {
+  font-size: 13px;
+}
+
+.annotation-id {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.annotation-expression {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.annotation-card button {
+  padding: 4px 8px;
+  color: var(--danger);
+  background: none;
+  border: 1px solid #e6c3c7;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.annotation-card button:hover {
+  background: #fdf1f2;
+}
+
+.annotation-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.annotation-card label input {
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.annotation-card label input:disabled {
+  color: var(--text-muted);
+  background: var(--panel-muted);
+}
+
+.annotation-card > div:has(label + label) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xs);
+}
+
+.annotation-card [role="alert"] {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* Status bar */
+
+.status-bar {
+  display: flex;
+  gap: var(--space-lg);
+  align-items: center;
+  padding: var(--space-sm) var(--space-lg);
+  font-size: 12px;
+  color: #cbd5e0;
+  background: var(--workspace-raised);
+  border-top: 1px solid #0c1116;
+}
+
+.status-notice {
+  min-height: 1em;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--warning);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dialogs */
+
+.error-dialog-backdrop,
+.new-annotation-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgb(9 13 18 / 62%);
+}
+
+.error-dialog-panel,
+.new-annotation-dialog > div {
+  width: min(520px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.error-dialog-panel h2,
+.new-annotation-dialog h2 {
+  margin: 0 0 var(--space-sm);
+  font-size: 18px;
+}
+
+.error-dialog-panel ul {
+  max-height: 40vh;
+  margin: 0 0 var(--space-md);
+  padding-left: 20px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.error-dialog-panel li {
+  overflow-wrap: anywhere;
+  margin-bottom: var(--space-xs);
+}
+
+.error-dialog-panel button,
+.new-annotation-dialog button {
+  padding: 8px 14px;
+  color: #fff;
+  background: var(--accent-strong);
+  border: none;
+  cursor: pointer;
+}
+
+.new-annotation-dialog {
+  flex-direction: column;
+}
+
+.new-annotation-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.new-annotation-dialog input {
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.new-annotation-dialog > div:last-child {
+  display: flex;
+  gap: var(--space-sm);
+  justify-content: flex-end;
+  margin-top: var(--space-lg);
+}
+
+.new-annotation-dialog button:first-child {
+  color: var(--text);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+}
+
+.fatal-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-lg);
+  color: var(--text);
+}
+
+.fatal-error h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.fatal-error button {
+  padding: 10px 16px;
+  color: #fff;
+  background: var(--accent-strong);
+  border: none;
+  cursor: pointer;
+}
+
+/* Narrow layout drawer */
+
+@media (max-width: 900px) {
+  .editor-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .annotation-side {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 20;
+    width: min(var(--panel-width), 100%);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .toolbar {
+    gap: var(--space-xs);
+  }
+
+  .toolbar-file-names {
+    order: 10;
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
 }

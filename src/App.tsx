@@ -16,11 +16,13 @@ import {
   saveTextAs,
   writeTextToHandle,
 } from "./app/fileIO";
+import { useMediaQuery } from "./app/useMediaQuery";
 import {
   isEditableTarget,
   useKeyboardShortcuts,
 } from "./app/useKeyboardShortcuts";
 import { useUnsavedWarning } from "./app/useUnsavedWarning";
+import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
 import { AnnotationPanel } from "./components/AnnotationPanel";
 import { NewAnnotationDialog } from "./components/NewAnnotationDialog";
@@ -141,6 +143,9 @@ function EditorWorkspace(): JSX.Element {
   const [pendingCoordinateIds, setPendingCoordinateIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
+  const [panelOpen, setPanelOpen] = useState(false);
+  const narrowLayout = useMediaQuery("(max-width: 900px)");
+  const panelVisible = !narrowLayout || panelOpen;
   const viewportRef = useRef<ViewportHandle>(null);
   const stateRef = useRef(state);
   const importGenerationRef = useRef(0);
@@ -413,14 +418,17 @@ function EditorWorkspace(): JSX.Element {
       const contents = serializeAnnotationsTxt(snapshot);
       if (labelHandleRef.current) {
         await writeTextToHandle(labelHandleRef.current, contents);
+        setNotice(
+          `Saved "${latestState.labelFileName ?? "annotations"}" in place.`,
+        );
       } else {
-        downloadText(
-          contents,
-          editedTxtName(
-            latestState.labelFileName,
-            latestState.image?.name ?? null,
-          ),
-          "text/plain",
+        const fileName = editedTxtName(
+          latestState.labelFileName,
+          latestState.image?.name ?? null,
+        );
+        downloadText(contents, fileName, "text/plain");
+        setNotice(
+          `Downloaded "${fileName}". This browser cannot write back to the imported file.`,
         );
       }
       if (stateRef.current.annotations === snapshot) {
@@ -548,6 +556,9 @@ function EditorWorkspace(): JSX.Element {
         mode={state.mode}
         addBoxDisabled={state.image === null}
         onAddBox={() => dispatch({ type: "SET_MODE", mode: "add" })}
+        panelToggleVisible={narrowLayout}
+        panelOpen={panelVisible}
+        onTogglePanel={() => setPanelOpen((open) => !open)}
       />
       <main className="editor-layout">
         <section
@@ -580,16 +591,29 @@ function EditorWorkspace(): JSX.Element {
               onDraftBox={setDraftBBox}
             />
           ) : (
-            <p>
-              {dragActive
-                ? "Drop files to import"
-                : "Drop an image and label file here"}
-            </p>
+            <div className="workspace-empty">
+              <p>
+                {dragActive
+                  ? "Drop files to import"
+                  : "Drop an image and label file here"}
+              </p>
+              <p className="workspace-examples">
+                Or start from the bundled fixtures:{" "}
+                <a href="/examples/rec-aerial-scene.svg" download>
+                  Example image
+                </a>{" "}
+                <a href="/examples/rec-aerial-scene.txt" download>
+                  Example labels
+                </a>
+              </p>
+            </div>
           )}
         </section>
         <aside
+          className="annotation-side"
           aria-label="Annotations"
           aria-hidden={draftBBox !== null ? true : undefined}
+          hidden={!panelVisible}
         >
           <AnnotationPanel
             annotations={state.annotations}
@@ -624,8 +648,10 @@ function EditorWorkspace(): JSX.Element {
 
 export default function App(): JSX.Element {
   return (
-    <EditorProvider>
-      <EditorWorkspace />
-    </EditorProvider>
+    <EditorErrorBoundary>
+      <EditorProvider>
+        <EditorWorkspace />
+      </EditorProvider>
+    </EditorErrorBoundary>
   );
 }
