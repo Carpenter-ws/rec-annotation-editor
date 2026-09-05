@@ -151,6 +151,7 @@ function EditorWorkspace(): JSX.Element {
   >(() => new Set());
   const [panelOpen, setPanelOpen] = useState(false);
   const [highlightedLabel, setHighlightedLabel] = useState<string | null>(null);
+  const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [labelPickerBlocked, setLabelPickerBlocked] = useState(false);
   const fallbackLabelInputRef = useRef<HTMLInputElement>(null);
   const narrowLayout = useMediaQuery("(max-width: 900px)");
@@ -176,6 +177,34 @@ function EditorWorkspace(): JSX.Element {
   const locateAnnotation = useCallback((id: string) => {
     viewportRef.current?.centerAnnotation(id);
   }, []);
+  const handleActivateLabel = useCallback(
+    (label: string) => {
+      setActiveLabel((current) => {
+        const nextActive = current === label ? null : label;
+        if (nextActive) {
+          const selected = stateRef.current.selectedId;
+          if (selected) {
+            const selectedAnnotation = stateRef.current.annotations.find(
+              (candidate) => candidate.id === selected,
+            );
+            if (selectedAnnotation && selectedAnnotation.label !== nextActive) {
+              dispatch({ type: "SELECT", id: null });
+            }
+          }
+        }
+        return nextActive;
+      });
+    },
+    [dispatch],
+  );
+  const handleResetView = useCallback(() => {
+    setActiveLabel(null);
+    setHighlightedLabel(null);
+    if (stateRef.current.selectedId) {
+      dispatch({ type: "SELECT", id: null });
+    }
+    viewportRef.current?.fit();
+  }, [dispatch]);
   const handleCoordinateDraftChange = useCallback(
     (id: string, pending: boolean) => {
       setPendingCoordinateIds((current) => {
@@ -242,6 +271,7 @@ function EditorWorkspace(): JSX.Element {
       setDraftBBox(null);
       pendingCenterIdRef.current = null;
       setHighlightedLabel(null);
+      setActiveLabel(null);
       dispatch({ type: "SET_MODE", mode: "select" });
     }
     const generation = requestedGeneration ?? ++importGenerationRef.current;
@@ -611,6 +641,7 @@ function EditorWorkspace(): JSX.Element {
               annotations={state.annotations}
               selectedId={state.selectedId}
               highlightedLabel={highlightedLabel}
+              visibleLabel={activeLabel}
               dispatch={dispatch}
               onZoomChange={setZoomScale}
               mode={state.mode}
@@ -649,6 +680,9 @@ function EditorWorkspace(): JSX.Element {
             onLocate={locateAnnotation}
             onCoordinateDraftChange={handleCoordinateDraftChange}
             onHighlightLabel={setHighlightedLabel}
+            activeLabel={activeLabel}
+            onActivateLabel={handleActivateLabel}
+            onReset={handleResetView}
           />
         </aside>
       </main>
@@ -673,7 +707,7 @@ function EditorWorkspace(): JSX.Element {
         ref={fallbackLabelInputRef}
         type="file"
         accept=".txt,text/plain"
-        aria-label="Open labels (fallback)"
+        aria-label="Fallback label file"
         hidden
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];

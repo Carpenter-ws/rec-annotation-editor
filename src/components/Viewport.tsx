@@ -51,15 +51,6 @@ function clampedFitTransform(
   };
 }
 
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return (
-    target.closest(
-      'button, a[href], input, select, textarea, summary, [contenteditable]:not([contenteditable="false"]), [role]:not([role="none"]):not([role="presentation"])',
-    ) !== null
-  );
-}
-
 function blurActiveExpressionTransactionOwner(): void {
   const activeElement = document.activeElement;
   if (
@@ -76,6 +67,8 @@ export interface ViewportProps {
   annotations: readonly Annotation[];
   selectedId: string | null;
   highlightedLabel?: string | null;
+  /** When set, only boxes with this label are rendered (category isolation). */
+  visibleLabel?: string | null;
   dispatch: Dispatch<EditorAction>;
   onZoomChange: (scale: number) => void;
   mode: "select" | "add";
@@ -221,6 +214,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     annotations,
     selectedId,
     highlightedLabel = null,
+    visibleLabel = null,
     dispatch,
     onZoomChange,
     mode,
@@ -234,7 +228,6 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   const interactionMovedRef = useRef(false);
   const suppressClickRef = useRef(false);
   const suppressClickTimerRef = useRef<number | null>(null);
-  const spacePressedRef = useRef(false);
   const fitModeRef = useRef(initialTransform === undefined);
   const viewportSizeRef = useRef({ width: 0, height: 0 });
   const imageIdentityRef = useRef(image.url);
@@ -272,28 +265,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         cancelActiveInteraction();
         return;
       }
-      if (event.code !== "Space" || isInteractiveTarget(event.target)) return;
-      event.preventDefault();
-      spacePressedRef.current = true;
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === "Space") spacePressedRef.current = false;
-    };
-    const clearSpace = () => {
-      spacePressedRef.current = false;
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") clearSpace();
     };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", clearSpace);
-    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", clearSpace);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (suppressClickTimerRef.current !== null) {
         window.clearTimeout(suppressClickTimerRef.current);
       }
@@ -401,16 +376,29 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
 
   const onWheel = (event: WheelEvent<SVGSVGElement>) => {
     event.preventDefault();
-    const nextScale = clampScale(
-      transform.scale * Math.exp(-event.deltaY * 0.0015),
-    );
-    setTransform(zoomAroundPoint(transform, localPoint(event), nextScale));
+    // Ctrl/Cmd + wheel zooms around the cursor; Shift + wheel pans sideways;
+    // the plain wheel pans the view vertically (trackpad deltaX included).
+    if (event.ctrlKey || event.metaKey) {
+      const nextScale = clampScale(
+        transform.scale * Math.exp(-event.deltaY * 0.0015),
+      );
+      setTransform(zoomAroundPoint(transform, localPoint(event), nextScale));
+    } else {
+      const horizontal = event.shiftKey
+        ? (event.deltaX !== 0 ? event.deltaX : event.deltaY)
+        : event.deltaX;
+      setTransform({
+        ...transform,
+        offsetX: transform.offsetX - horizontal,
+        offsetY: transform.offsetY - (event.shiftKey ? 0 : event.deltaY),
+      });
+    }
     fitModeRef.current = false;
   };
 
   const onPointerDown = (event: PointerEvent<SVGSVGElement>) => {
     const startsPan =
-      event.button === 1 || (event.button === 0 && spacePressedRef.current);
+      event.button === 1 || (event.button === 0 && event.shiftKey);
     if (startsPan) {
       event.preventDefault();
       interactionRef.current = {
@@ -579,6 +567,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
   };
 
+  const renderedAnnotations = visibleLabel
+    ? annotations.filter((annotation) => annotation.label === visibleLabel)
+    : annotations;
+
   const startMove = (
     event: PointerEvent<SVGGElement>,
     annotation: Annotation,
@@ -586,7 +578,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     if (
       mode !== "select" ||
       event.button !== 0 ||
-      spacePressedRef.current ||
+      event.shiftKey ||
       interactionRef.current !== null
     ) {
       return;
@@ -614,7 +606,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     if (
       mode !== "select" ||
       event.button !== 0 ||
-      spacePressedRef.current ||
+      event.shiftKey ||
       interactionRef.current !== null
     ) {
       return;
@@ -673,7 +665,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
           aria-label={image.name}
           role="img"
         />
-        {annotations.map((annotation) => (
+        {renderedAnnotations.map((annotation) => (
           <AnnotationBox
             key={annotation.id}
             annotation={annotation}

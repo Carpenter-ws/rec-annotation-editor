@@ -2240,7 +2240,7 @@ it("maps editor history and delete shortcuts while protecting editable fields", 
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
-  await user.click(await screen.findByText("person", { exact: true }));
+  await user.click(await screen.findByText("Annotation 1"));
 
   fireEvent.keyDown(window, { key: "Delete" });
   expect(screen.getByText("0 annotations")).toBeVisible();
@@ -3095,10 +3095,11 @@ it("groups panel cards by their text label with one subcard per box", async () =
   ).toHaveLength(1);
 });
 
-it("activates a category to highlight all of its boxes and select the first", async () => {
+it("isolates a category on the canvas when its header is activated", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
+  mockPointerEnvironment();
   render(<App />);
 
   await user.upload(
@@ -3111,24 +3112,64 @@ it("activates a category to highlight all of its boxes and select the first", as
   );
   await screen.findByText("person", { exact: true });
 
-  await user.click(screen.getByText("person", { exact: true }));
+  fireEvent.click(screen.getByTestId("bbox-ann_001"));
+  await user.click(screen.getByText("bicycle", { exact: true }));
 
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("bbox-ann_002")).not.toBeInTheDocument();
+  expect(screen.getByTestId("bbox-ann_003")).toBeVisible();
+  const panel = screen.getByRole("complementary", { name: "Annotations" });
+  expect(
+    panel.querySelector('.annotation-group-header[data-group-label="bicycle"]'),
+  ).toHaveClass("is-active");
+  expect(panel.querySelector('[aria-current="true"]')).toBeNull();
+
+  await user.click(screen.getByText("bicycle", { exact: true }));
+  expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
+  expect(screen.getByTestId("bbox-ann_002")).toBeVisible();
+  expect(
+    panel.querySelector('.annotation-group-header[data-group-label="bicycle"]'),
+  ).not.toHaveClass("is-active");
+});
+
+it("resets isolation, selection, and the view with the reset control", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment(400, 300);
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  await screen.findByText("person", { exact: true });
+  const imageSpace = screen.getByTestId("image-space");
+  const fitScale = imageSpace.getAttribute("data-scale");
+
+  fireEvent.click(screen.getByTestId("bbox-ann_001"));
+  await user.click(screen.getByText("bicycle", { exact: true }));
+  await user.click(screen.getByRole("button", { name: "Zoom in" }));
+  expect(imageSpace.getAttribute("data-scale")).not.toBe(fitScale);
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Reset" }));
+
+  expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
     "data-selected",
-    "true",
-  );
-  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
-    "data-highlighted",
-    "true",
-  );
-  expect(screen.getByTestId("bbox-ann_002")).toHaveAttribute(
-    "data-highlighted",
-    "true",
-  );
-  expect(screen.getByTestId("bbox-ann_003")).toHaveAttribute(
-    "data-highlighted",
     "false",
   );
+  expect(imageSpace.getAttribute("data-scale")).toBe(fitScale);
+  expect(
+    screen
+      .getByRole("complementary", { name: "Annotations" })
+      .querySelector('[aria-current="true"]'),
+  ).toBeNull();
 });
 
 it("collapses and reopens a category from its header control", async () => {
@@ -3348,7 +3389,7 @@ it("falls back to the classic file dialog when direct file access is blocked", a
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await user.upload(
-    screen.getByLabelText("Open labels (fallback)"),
+    screen.getByLabelText("Fallback label file"),
     textFile("0 0 10 10 fallback label 0"),
   );
 

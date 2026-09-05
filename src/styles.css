@@ -323,7 +323,6 @@ input,
 }
 
 .panel-groups-toggle {
-  margin-left: auto;
   padding: 3px 10px;
   font-size: 12px;
   color: var(--accent-strong);
@@ -332,8 +331,21 @@ input,
   cursor: pointer;
 }
 
+.annotation-panel-summary .panel-groups-toggle:first-of-type {
+  margin-left: auto;
+}
+
 .panel-groups-toggle:hover {
   background: var(--panel-muted);
+}
+
+.annotation-group-header.is-active {
+  background: rgb(14 165 183 / 12%);
+  border-color: var(--accent);
+}
+
+.annotation-group-header.is-active .annotation-group-label {
+  color: var(--accent-strong);
 }
 
 .annotation-groups {

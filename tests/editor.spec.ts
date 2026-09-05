@@ -46,7 +46,7 @@ test("edits a complete REC document without coordinate drift", async ({
   }
   await expect(page.getByTestId("zoom-percent")).not.toHaveText(initialZoom);
 
-  // Bring the selected box back into view before wheel zooming on it.
+  // Bring the selected box back into view before Ctrl-wheel zooming on it.
   await duplicatePeople.nth(1).click();
   const canvas = page.locator(".viewport-svg");
   const canvasRect = await canvas.boundingBox();
@@ -54,9 +54,11 @@ test("edits a complete REC document without coordinate drift", async ({
   await canvas.hover({
     position: { x: canvasRect.width / 2, y: canvasRect.height / 2 },
   });
+  await page.keyboard.down("Control");
   await page.mouse.wheel(0, -240);
+  await page.keyboard.up("Control");
 
-  await page.keyboard.down("Space");
+  await page.keyboard.down("Shift");
   await page.mouse.move(canvasRect.width / 2, canvasRect.height / 2);
   await page.mouse.down();
   await page.mouse.move(
@@ -65,7 +67,7 @@ test("edits a complete REC document without coordinate drift", async ({
     { steps: 4 },
   );
   await page.mouse.up();
-  await page.keyboard.up("Space");
+  await page.keyboard.up("Shift");
 
   await page.setViewportSize({ width: 1024, height: 768 });
   expect(await readCoordinates()).toEqual(before);

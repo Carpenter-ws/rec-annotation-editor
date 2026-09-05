@@ -77,6 +77,7 @@ interface RenderOptions {
   annotations?: Annotation[];
   initialTransform?: ViewTransform;
   selectedId?: string | null;
+  visibleLabel?: string | null;
   viewportRef?: RefObject<ViewportHandle>;
   mode?: "select" | "add";
   onDraftBox?: (bbox: BBox) => void;
@@ -89,6 +90,7 @@ function renderViewport(options: RenderOptions = {}) {
       image={options.image ?? image}
       annotations={options.annotations ?? annotations}
       selectedId={options.selectedId ?? null}
+      visibleLabel={options.visibleLabel}
       dispatch={dispatch}
       initialTransform={options.initialTransform}
       onZoomChange={vi.fn()}
@@ -1033,7 +1035,28 @@ it("ignores an add-mode draft narrower than three screen pixels", () => {
   expect(onDraftBox).not.toHaveBeenCalled();
 });
 
-it("keeps the same image point beneath the wheel cursor", () => {
+it("renders only the boxes of the isolated label", () => {
+  const allAnnotations: Annotation[] = [
+    ...duplicateLabels,
+    {
+      id: "ann_003",
+      bbox: { x1: 300, y1: 300, x2: 420, y2: 420 },
+      label: "bicycle",
+      reservedField: "0",
+    },
+  ];
+  renderViewport({ annotations: allAnnotations, visibleLabel: "person" });
+
+  expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
+  expect(screen.getByTestId("bbox-ann_002")).toBeVisible();
+  expect(screen.queryByTestId("bbox-ann_003")).not.toBeInTheDocument();
+
+  cleanup();
+  renderViewport({ annotations: allAnnotations });
+  expect(screen.getByTestId("bbox-ann_003")).toBeVisible();
+});
+
+it("keeps the same image point beneath the Ctrl-wheel cursor", () => {
   renderViewport({
     initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },
   });
@@ -1043,6 +1066,7 @@ it("keeps the same image point beneath the wheel cursor", () => {
     clientX: 420,
     clientY: 300,
     deltaY: -Math.log(2) / 0.0015,
+    ctrlKey: true,
   });
 
   const imageSpace = screen.getByTestId("image-space");
@@ -1051,18 +1075,75 @@ it("keeps the same image point beneath the wheel cursor", () => {
   expect(Number(imageSpace.getAttribute("data-offset-y"))).toBeCloseTo(-240, 10);
 });
 
-it("clamps wheel zoom to the supported scale range", () => {
+it("clamps Ctrl-wheel zoom to the supported scale range", () => {
   renderViewport({
     initialTransform: { scale: 1, offsetX: 0, offsetY: 0 },
   });
   const canvas = screen.getByLabelText("Annotation canvas");
   const imageSpace = screen.getByTestId("image-space");
 
-  fireEvent.wheel(canvas, { clientX: 500, clientY: 350, deltaY: 10_000 });
+  fireEvent.wheel(canvas, {
+    clientX: 500,
+    clientY: 350,
+    deltaY: 10_000,
+    ctrlKey: true,
+  });
   expect(Number(imageSpace.getAttribute("data-scale"))).toBe(0.05);
 
-  fireEvent.wheel(canvas, { clientX: 500, clientY: 350, deltaY: -10_000 });
+  fireEvent.wheel(canvas, {
+    clientX: 500,
+    clientY: 350,
+    deltaY: -10_000,
+    ctrlKey: true,
+  });
   expect(Number(imageSpace.getAttribute("data-scale"))).toBe(32);
+});
+
+it("pans the view vertically with the plain wheel", () => {
+  renderViewport({
+    initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },
+  });
+  const canvas = screen.getByLabelText("Annotation canvas");
+
+  fireEvent.wheel(canvas, { clientX: 420, clientY: 300, deltaY: 120 });
+
+  const imageSpace = screen.getByTestId("image-space");
+  expect(imageSpace).toHaveAttribute("data-scale", "0.5");
+  expect(imageSpace).toHaveAttribute("data-offset-x", "20");
+  expect(imageSpace).toHaveAttribute("data-offset-y", "-90");
+
+  fireEvent.wheel(canvas, { clientX: 420, clientY: 300, deltaX: -50 });
+  expect(imageSpace).toHaveAttribute("data-offset-x", "70");
+  expect(imageSpace).toHaveAttribute("data-offset-y", "-90");
+});
+
+it("pans the view horizontally with Shift+wheel", () => {
+  renderViewport({
+    initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },
+  });
+  const canvas = screen.getByLabelText("Annotation canvas");
+
+  fireEvent.wheel(canvas, {
+    clientX: 420,
+    clientY: 300,
+    deltaY: 120,
+    shiftKey: true,
+  });
+
+  const imageSpace = screen.getByTestId("image-space");
+  expect(imageSpace).toHaveAttribute("data-scale", "0.5");
+  expect(imageSpace).toHaveAttribute("data-offset-x", "-100");
+  expect(imageSpace).toHaveAttribute("data-offset-y", "30");
+
+  fireEvent.wheel(canvas, {
+    clientX: 420,
+    clientY: 300,
+    deltaX: 40,
+    deltaY: 120,
+    shiftKey: true,
+  });
+  expect(imageSpace).toHaveAttribute("data-offset-x", "-140");
+  expect(imageSpace).toHaveAttribute("data-offset-y", "30");
 });
 
 it("pans with the middle button while holding pointer capture", () => {
@@ -1111,7 +1192,7 @@ it("pans with the middle button while holding pointer capture", () => {
   expect(releasePointerCapture).toHaveBeenCalledTimes(1);
 });
 
-it("pans with the left button only while Space is held", () => {
+it("pans with Shift+left drag but not with a plain left drag", () => {
   renderViewport({
     initialTransform: { scale: 0.75, offsetX: 10, offsetY: 15 },
   });
@@ -1137,11 +1218,12 @@ it("pans with the left button only while Space is held", () => {
     "data-offset-x",
     "10",
   );
+  fireEvent.pointerUp(canvas, { pointerId: 8 });
 
-  fireEvent.keyDown(window, { code: "Space" });
   fireEvent.pointerDown(canvas, {
     button: 0,
     pointerId: 9,
+    shiftKey: true,
     clientX: 50,
     clientY: 60,
   });
@@ -1156,50 +1238,6 @@ it("pans with the left button only while Space is held", () => {
   expect(imageSpace).toHaveAttribute("data-offset-x", "40");
   expect(imageSpace).toHaveAttribute("data-offset-y", "55");
   expect(setPointerCapture).toHaveBeenCalledWith(9);
-
-  fireEvent.keyUp(window, { code: "Space" });
-});
-
-it("prevents canvas Space scrolling, preserves interactive keys, and resets on blur", () => {
-  renderViewport({
-    initialTransform: { scale: 1, offsetX: 10, offsetY: 15 },
-  });
-  const canvas = screen.getByLabelText("Annotation canvas");
-  const setPointerCapture = vi.fn();
-  Object.assign(canvas, {
-    setPointerCapture,
-    releasePointerCapture: vi.fn(),
-  });
-
-  expect(fireEvent.keyDown(window, { code: "Space" })).toBe(false);
-  fireEvent.blur(window);
-  fireEvent.pointerDown(canvas, {
-    button: 0,
-    pointerId: 12,
-    clientX: 50,
-    clientY: 60,
-  });
-  fireEvent.pointerMove(canvas, {
-    pointerId: 12,
-    clientX: 90,
-    clientY: 100,
-  });
-
-  expect(setPointerCapture).not.toHaveBeenCalled();
-  expect(screen.getByTestId("image-space")).toHaveAttribute(
-    "transform",
-    "translate(10 15) scale(1)",
-  );
-
-  const input = document.createElement("input");
-  document.body.append(input);
-  expect(fireEvent.keyDown(input, { code: "Space" })).toBe(true);
-  input.remove();
-
-  const button = document.createElement("button");
-  document.body.append(button);
-  expect(fireEvent.keyDown(button, { code: "Space" })).toBe(true);
-  button.remove();
 });
 
 it("does not change selection when a completed pan produces a click", () => {
@@ -1212,9 +1250,9 @@ it("does not change selection when a completed pan produces a click", () => {
     hasPointerCapture: vi.fn(() => true),
   });
 
-  fireEvent.keyDown(window, { code: "Space" });
   fireEvent.pointerDown(box, {
     button: 0,
+    shiftKey: true,
     pointerId: 11,
     clientX: 100,
     clientY: 120,
@@ -1226,7 +1264,6 @@ it("does not change selection when a completed pan produces a click", () => {
   });
   fireEvent.pointerUp(canvas, { pointerId: 11 });
   fireEvent.click(box);
-  fireEvent.keyUp(window, { code: "Space" });
 
   expect(dispatch).not.toHaveBeenCalled();
 });
@@ -1254,6 +1291,7 @@ it("refits on resize only until the user zooms manually", () => {
     clientX: 400,
     clientY: 300,
     deltaY: -Math.log(2) / 0.0015,
+    ctrlKey: true,
   });
   const manualTransform = imageSpace.getAttribute("transform");
 

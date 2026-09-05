@@ -19,6 +19,10 @@ export interface AnnotationPanelProps {
   onLocate: (id: string) => void;
   onCoordinateDraftChange?: (id: string, pending: boolean) => void;
   onHighlightLabel?: (label: string | null) => void;
+  /** The currently isolated category, whose boxes are shown alone on canvas. */
+  activeLabel?: string | null;
+  onActivateLabel?: (label: string) => void;
+  onReset?: () => void;
 }
 
 interface AnnotationEntry {
@@ -41,6 +45,9 @@ export function AnnotationPanel({
   onLocate,
   onCoordinateDraftChange,
   onHighlightLabel,
+  activeLabel = null,
+  onActivateLabel,
+  onReset,
 }: AnnotationPanelProps): JSX.Element {
   const [query, setQuery] = useState("");
   const [activeExpressionId, setActiveExpressionId] = useState<string | null>(
@@ -157,12 +164,9 @@ export function AnnotationPanel({
   const activateGroup = useCallback(
     (group: LabelGroup) => {
       onHighlightLabel?.(group.label);
-      const first = group.entries[0];
-      if (!first) return;
-      selectAnnotation(first.annotation.id);
-      onLocate(first.annotation.id);
+      onActivateLabel?.(group.label);
     },
-    [onHighlightLabel, onLocate, selectAnnotation],
+    [onActivateLabel, onHighlightLabel],
   );
 
   const toggleGroup = useCallback(
@@ -238,13 +242,23 @@ export function AnnotationPanel({
           </p>
         ) : null}
         {groups.length > 0 ? (
-          <button
-            type="button"
-            className="panel-groups-toggle"
-            onClick={toggleAllGroups}
-          >
-            {allExpanded ? "Collapse all" : "Expand all"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="panel-groups-toggle"
+              title="Clear selection, show every box, and fit the image"
+              onClick={onReset}
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              className="panel-groups-toggle"
+              onClick={toggleAllGroups}
+            >
+              {allExpanded ? "Collapse all" : "Expand all"}
+            </button>
+          </>
         ) : null}
       </div>
       {visibleGroups.length > 0 ? (
@@ -254,7 +268,11 @@ export function AnnotationPanel({
             const rows: JSX.Element[] = [
               <header
                 key={`header:${group.label}`}
-                className="annotation-group-header"
+                className={
+                  activeLabel === group.label
+                    ? "annotation-group-header is-active"
+                    : "annotation-group-header"
+                }
                 data-group-label={group.label}
                 onMouseEnter={() => onHighlightLabel?.(group.label)}
                 onMouseLeave={() => onHighlightLabel?.(null)}

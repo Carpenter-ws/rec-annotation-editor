@@ -35,8 +35,11 @@ On Windows, run the script from Git Bash/WSL, or start the dev server directly:
    - the panel groups cards by their text label: each category header shows the
      expression and how many boxes share it, with every box one level below as
      its own card (ID, expression, exact coordinates);
-   - hover a category (or click its name) to highlight **all** of its boxes on
-     the canvas; clicking the category name also selects its first box;
+   - hover a category to highlight **all** of its boxes on the canvas; click a
+     category to **isolate** it — only its boxes stay visible and the header is
+     highlighted; click it again to show everything;
+   - **Reset** (next to Collapse all) clears the selection and isolation,
+     reveals every box, and re-fits the image;
    - collapse or reopen a category with its arrow, or use **Collapse all /
      Expand all**; the category of a selected box always reopens;
    - click a box (or a card) to select it; the panel locates the matching card
@@ -68,8 +71,10 @@ resizing only change the view; they never rewrite box data.
 | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` | Redo |
 | `Delete` / `Backspace` | Delete the selected annotation |
 | `Escape` | Leave Add box mode / cancel a dialog or drag |
-| `Space` + drag, or middle-drag | Pan the canvas |
-| Mouse wheel | Zoom around the cursor |
+| `Ctrl/Cmd` + mouse wheel | Zoom around the cursor |
+| Mouse wheel | Pan the image up/down |
+| `Shift` + mouse wheel | Pan the image left/right |
+| `Shift` + left-drag, or middle-drag | Pan the canvas |
 
 ## Label formats
 
