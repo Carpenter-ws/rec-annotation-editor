@@ -20,6 +20,14 @@ test("edits a complete REC document without coordinate drift", async ({
   await expect(cards).toHaveCount(24);
   await expect(page.getByText("1920 × 1080", { exact: true })).toBeVisible();
 
+  // Selecting directly on the canvas must work and reveal the resize handles.
+  await page.getByTestId("bbox-ann_009").click();
+  await expect(page.getByTestId("bbox-ann_009")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await expect(page.getByTestId("handle-se")).toBeVisible();
+
   // Select the second duplicate `person` and confirm its own ID is highlighted.
   const duplicatePeople = page.locator('[data-annotation-label="person"]');
   await duplicatePeople.nth(1).click();

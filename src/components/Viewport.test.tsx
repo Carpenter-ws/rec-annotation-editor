@@ -1056,6 +1056,48 @@ it("renders only the boxes of the isolated label", () => {
   expect(screen.getByTestId("bbox-ann_003")).toBeVisible();
 });
 
+it("selects a clicked box even though pointer capture retargets the click", () => {
+  renderViewport({ selectedId: null });
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+
+  fireEvent.pointerDown(screen.getByTestId("bbox-ann_001"), {
+    button: 0,
+    pointerId: 5,
+    clientX: 100,
+    clientY: 120,
+  });
+  fireEvent.pointerUp(canvas, { pointerId: 5 });
+  fireEvent.click(canvas);
+
+  expect(dispatch).toHaveBeenCalledWith({ type: "SELECT", id: "ann_001" });
+});
+
+it("prevents the default browser handling of canvas wheel events", () => {
+  renderViewport();
+  const canvas = screen.getByLabelText("Annotation canvas");
+
+  const zoomEvent = new WheelEvent("wheel", {
+    deltaY: -120,
+    ctrlKey: true,
+    cancelable: true,
+  });
+  act(() => {
+    canvas.dispatchEvent(zoomEvent);
+  });
+  expect(zoomEvent.defaultPrevented).toBe(true);
+
+  const panEvent = new WheelEvent("wheel", { deltaY: 120, cancelable: true });
+  act(() => {
+    canvas.dispatchEvent(panEvent);
+  });
+  expect(panEvent.defaultPrevented).toBe(true);
+});
+
 it("keeps the same image point beneath the Ctrl-wheel cursor", () => {
   renderViewport({
     initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },

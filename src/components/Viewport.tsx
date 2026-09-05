@@ -8,7 +8,6 @@ import {
   type JSX,
   type MouseEvent,
   type PointerEvent,
-  type WheelEvent,
 } from "react";
 import {
   fitTransform,
@@ -235,6 +234,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     initialTransform ?? DEFAULT_TRANSFORM,
   );
   const [draftBBox, setDraftBBox] = useState<BBox | null>(null);
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
 
   const releasePointerCapture = (pointerId: number) => {
     const svg = svgRef.current;
@@ -374,27 +375,50 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
 
-  const onWheel = (event: WheelEvent<SVGSVGElement>) => {
-    event.preventDefault();
-    // Ctrl/Cmd + wheel zooms around the cursor; Shift + wheel pans sideways;
-    // the plain wheel pans the view vertically (trackpad deltaX included).
-    if (event.ctrlKey || event.metaKey) {
-      const nextScale = clampScale(
-        transform.scale * Math.exp(-event.deltaY * 0.0015),
-      );
-      setTransform(zoomAroundPoint(transform, localPoint(event), nextScale));
-    } else {
-      const horizontal = event.shiftKey
-        ? (event.deltaX !== 0 ? event.deltaX : event.deltaY)
-        : event.deltaX;
-      setTransform({
-        ...transform,
-        offsetX: transform.offsetX - horizontal,
-        offsetY: transform.offsetY - (event.shiftKey ? 0 : event.deltaY),
-      });
-    }
-    fitModeRef.current = false;
-  };
+  // React registers wheel listeners as passive, so preventDefault would be
+  // ignored and Ctrl+wheel would also zoom the whole page. A native
+  // non-passive listener is required to own the wheel gesture.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const onWheelNative = (event: WheelEvent) => {
+      event.preventDefault();
+      const transform = transformRef.current;
+      // Ctrl/Cmd + wheel zooms around the cursor; Shift + wheel pans sideways;
+      // the plain wheel pans the view vertically (trackpad deltaX included).
+      if (event.ctrlKey || event.metaKey) {
+        const nextScale = clampScale(
+          transform.scale * Math.exp(-event.deltaY * 0.0015),
+        );
+        setTransform(
+          zoomAroundPoint(
+            transform,
+            {
+              x: event.clientX - svg.getBoundingClientRect().left,
+              y: event.clientY - svg.getBoundingClientRect().top,
+            },
+            nextScale,
+          ),
+        );
+      } else {
+        const horizontal = event.shiftKey
+          ? (event.deltaX !== 0 ? event.deltaX : event.deltaY)
+          : event.deltaX;
+        setTransform({
+          ...transform,
+          offsetX: transform.offsetX - horizontal,
+          offsetY: transform.offsetY - (event.shiftKey ? 0 : event.deltaY),
+        });
+      }
+      fitModeRef.current = false;
+    };
+
+    svg.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => {
+      svg.removeEventListener("wheel", onWheelNative);
+    };
+  }, []);
 
   const onPointerDown = (event: PointerEvent<SVGSVGElement>) => {
     const startsPan =
@@ -536,6 +560,20 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     if (event.type === "pointerup" && editsAnnotation) {
       dispatch({ type: "COMMIT_TRANSACTION" });
+      if (!interactionMovedRef.current) {
+        // A plain click on the box or a handle. Pointer capture retargets the
+        // browser's click to the svg, which would deselect, so select here and
+        // swallow that click instead.
+        dispatch({ type: "SELECT", id: interaction.id });
+        suppressClickRef.current = true;
+        if (suppressClickTimerRef.current !== null) {
+          window.clearTimeout(suppressClickTimerRef.current);
+        }
+        suppressClickTimerRef.current = window.setTimeout(() => {
+          suppressClickRef.current = false;
+          suppressClickTimerRef.current = null;
+        }, 0);
+      }
     }
     if (event.type === "pointercancel" && editsAnnotation) {
       dispatch({ type: "CANCEL_TRANSACTION" });
@@ -631,7 +669,6 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       ref={svgRef}
       className="viewport-svg"
       aria-label="Annotation canvas"
-      onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={stopInteraction}
