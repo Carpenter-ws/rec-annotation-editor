@@ -22,6 +22,7 @@ export interface ToolbarProps {
   mode: "select" | "add";
   addBoxDisabled: boolean;
   onAddBox: () => void;
+  labelPickerBlocked: boolean;
   panelToggleVisible: boolean;
   panelOpen: boolean;
   onTogglePanel: () => void;
@@ -49,6 +50,7 @@ export function Toolbar({
   mode,
   addBoxDisabled,
   onAddBox,
+  labelPickerBlocked,
   panelToggleVisible,
   panelOpen,
   onTogglePanel,
@@ -84,7 +86,7 @@ export function Toolbar({
         <button
           type="button"
           onClick={() => {
-            if (window.showOpenFilePicker) {
+            if (window.showOpenFilePicker && !labelPickerBlocked) {
               onPickLabels();
               return;
             }

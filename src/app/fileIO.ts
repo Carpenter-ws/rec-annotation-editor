@@ -8,6 +8,18 @@ export interface DroppedFiles {
 
 export type SaveResult = "saved" | "cancelled" | "downloaded";
 
+/**
+ * Embedded frames, sandboxed pages, and some IDE previews expose the File
+ * System Access API but refuse to use it. Treat those as "unavailable" so the
+ * app can fall back to classic dialogs and downloads.
+ */
+export function isFileSystemAccessBlockedError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === "NotAllowedError" || error.name === "SecurityError")
+  );
+}
+
 const pendingHandleWrites = new WeakMap<FileSystemFileHandle, Promise<void>>();
 
 const IMAGE_EXTENSION =
@@ -90,6 +102,10 @@ export async function saveTextAs(
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       return "cancelled";
+    }
+    if (isFileSystemAccessBlockedError(error)) {
+      downloadText(contents, suggestedName, mime);
+      return "downloaded";
     }
     throw error;
   }

@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   downloadText,
+  isFileSystemAccessBlockedError,
   loadImageFile,
   partitionDroppedFiles,
   pickTextFile,
@@ -45,7 +46,12 @@ import {
 interface ImportFiles {
   image?: File;
   labels?: File;
+  /** Notice to surface after a successful import (e.g. fallback explanations). */
+  notice?: string;
 }
+
+const PICKER_BLOCKED_NOTICE =
+  "Direct file access is blocked in this context — use the classic file dialog.";
 
 interface ErrorReport {
   title: string;
@@ -145,6 +151,8 @@ function EditorWorkspace(): JSX.Element {
   >(() => new Set());
   const [panelOpen, setPanelOpen] = useState(false);
   const [highlightedLabel, setHighlightedLabel] = useState<string | null>(null);
+  const [labelPickerBlocked, setLabelPickerBlocked] = useState(false);
+  const fallbackLabelInputRef = useRef<HTMLInputElement>(null);
   const narrowLayout = useMediaQuery("(max-width: 900px)");
   const panelVisible = !narrowLayout || panelOpen;
   const viewportRef = useRef<ViewportHandle>(null);
@@ -349,7 +357,7 @@ function EditorWorkspace(): JSX.Element {
       });
     }
 
-    setNotice(clampNotice(clamped.count));
+    setNotice(clampNotice(clamped.count) ?? files.notice ?? null);
     if (rejectedIssues.length > 0) {
       setErrorReport({
         title: "Some dropped files were rejected",
@@ -406,6 +414,12 @@ function EditorWorkspace(): JSX.Element {
       ) {
         return;
       }
+      if (isFileSystemAccessBlockedError(error)) {
+        setLabelPickerBlocked(true);
+        setNotice(PICKER_BLOCKED_NOTICE);
+        fallbackLabelInputRef.current?.click();
+        return;
+      }
       setErrorReport({
         title: "Could not open labels",
         issues: [errorMessage(error)],
@@ -416,18 +430,26 @@ function EditorWorkspace(): JSX.Element {
   const save = async () => {
     const latestState = stateRef.current;
     const snapshot = latestState.annotations;
+    const fileName = editedTxtName(
+      latestState.labelFileName,
+      latestState.image?.name ?? null,
+    );
     try {
       const contents = serializeAnnotationsTxt(snapshot);
       if (labelHandleRef.current) {
-        await writeTextToHandle(labelHandleRef.current, contents);
-        setNotice(
-          `Saved "${latestState.labelFileName ?? "annotations"}" in place.`,
-        );
+        try {
+          await writeTextToHandle(labelHandleRef.current, contents);
+          setNotice(
+            `Saved "${latestState.labelFileName ?? "annotations"}" in place.`,
+          );
+        } catch (error) {
+          if (!isFileSystemAccessBlockedError(error)) throw error;
+          downloadText(contents, fileName, "text/plain");
+          setNotice(
+            `Downloaded "${fileName}". Direct file access is blocked in this context.`,
+          );
+        }
       } else {
-        const fileName = editedTxtName(
-          latestState.labelFileName,
-          latestState.image?.name ?? null,
-        );
         downloadText(contents, fileName, "text/plain");
         setNotice(
           `Downloaded "${fileName}". This browser cannot write back to the imported file.`,
@@ -533,6 +555,7 @@ function EditorWorkspace(): JSX.Element {
         labelFileName={state.labelFileName}
         dirty={effectiveDirty}
         scale={zoomScale}
+        labelPickerBlocked={labelPickerBlocked}
         onOpenImage={(file) => void importFiles({ image: file })}
         onOpenLabels={(file) => void importFiles({ labels: file })}
         onPickLabels={() => void pickLabels()}
@@ -645,6 +668,20 @@ function EditorWorkspace(): JSX.Element {
         title={errorReport?.title ?? "Import error"}
         issues={errorReport?.issues ?? []}
         onClose={() => setErrorReport(null)}
+      />
+      <input
+        ref={fallbackLabelInputRef}
+        type="file"
+        accept=".txt,text/plain"
+        aria-label="Open labels (fallback)"
+        hidden
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) {
+            void importFiles({ labels: file, notice: PICKER_BLOCKED_NOTICE });
+          }
+        }}
       />
     </div>
   );

@@ -3330,6 +3330,63 @@ it("collapses and expands every category at once", async () => {
   ).toBeVisible();
 });
 
+it("falls back to the classic file dialog when direct file access is blocked", async () => {
+  const user = userEvent.setup();
+  const picker = vi
+    .fn()
+    .mockResolvedValue([
+      {
+        getFile: vi
+          .fn()
+          .mockRejectedValue(
+            new DOMException("blocked", "NotAllowedError"),
+          ),
+      },
+    ]);
+  vi.stubGlobal("showOpenFilePicker", picker);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await user.upload(
+    screen.getByLabelText("Open labels (fallback)"),
+    textFile("0 0 10 10 fallback label 0"),
+  );
+
+  expect(await screen.findByDisplayValue("fallback label")).toBeVisible();
+  expect(screen.getByTestId("editor-notice")).toHaveTextContent(
+    /file dialog/i,
+  );
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  expect(picker).toHaveBeenCalledTimes(1);
+});
+
+it("downloads instead of writing when the retained handle is blocked", async () => {
+  const user = userEvent.setup();
+  const { click } = mockDownloadEnvironment();
+  const handle = {
+    getFile: vi
+      .fn()
+      .mockResolvedValue(textFile("0 0 10 10 person 0", "scene.txt")),
+    createWritable: vi
+      .fn()
+      .mockRejectedValue(new DOMException("blocked", "NotAllowedError")),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  expect(await screen.findByDisplayValue("person")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "scene-edited.txt",
+  );
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
