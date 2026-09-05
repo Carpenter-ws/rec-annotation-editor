@@ -32,13 +32,21 @@ On Windows, run the script from Git Bash/WSL, or start the dev server directly:
 2. **Open labels** — pick the matching TXT. You can also drag both files onto
    the workspace at once, in either order.
 3. Edit on the canvas or in the right-hand panel:
+   - the panel groups cards by their text label: each category header shows the
+     expression and how many boxes share it, with every box one level below as
+     its own card (ID, expression, exact coordinates);
+   - hover a category (or click its name) to highlight **all** of its boxes on
+     the canvas; clicking the category name also selects its first box;
+   - collapse or reopen a category with its arrow, or use **Collapse all /
+     Expand all**; the category of a selected box always reopens;
    - click a box (or a card) to select it; the panel locates the matching card
      and vice versa;
-   - drag a box to move it, drag one of the eight square handles to resize it;
+   - drag a box to move it; drag a **corner** handle to resize it (both axes at
+     once, i.e. enlarge/shrink) or an **edge** handle to stretch one axis;
    - **Add box** enters draw mode: drag a rectangle, then type a free-text
      expression in the dialog;
-   - the panel search filters by expression; each card exposes X1/Y1/X2/Y2 for
-     exact original-pixel edits;
+   - the panel search filters by expression or box ID and reveals matching
+     categories; each card exposes X1/Y1/X2/Y2 for exact original-pixel edits;
    - **Delete** removes the selected annotation and stays undoable.
 4. **Save** writes back to the opened TXT (in Chromium, via the File System
    Access API). In browsers without write access — Firefox and Safari — the

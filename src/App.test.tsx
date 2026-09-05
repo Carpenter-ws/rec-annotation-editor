@@ -3052,6 +3052,284 @@ it("searches and selects one annotation in a 500-box document", async () => {
   expect(within(panel).getByText("ann_417", { exact: true })).toBeVisible();
 }, 60000);
 
+it("groups panel cards by their text label with one subcard per box", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(
+      "10 20 70 90 person 0\n100 110 180 200 person 0\n0 0 10 10 bicycle 0\n200 200 260 280 person 0",
+    ),
+  );
+
+  const panel = await screen.findByRole("complementary", {
+    name: "Annotations",
+  });
+  const headers = [
+    ...panel.querySelectorAll<HTMLElement>(".annotation-group-header"),
+  ];
+  expect(headers.map((header) => header.dataset.groupLabel)).toEqual([
+    "person",
+    "bicycle",
+  ]);
+
+  const personCards = [
+    ...panel.querySelectorAll<HTMLElement>(
+      '.annotation-group-card[data-group-label="person"] > [data-annotation-id]',
+    ),
+  ];
+  expect(personCards.map((card) => card.dataset.annotationId)).toEqual([
+    "ann_001",
+    "ann_002",
+    "ann_004",
+  ]);
+  expect(headers[0]!.querySelector(".annotation-group-count")).toHaveTextContent(
+    "3",
+  );
+
+  expect(
+    panel.querySelectorAll<HTMLElement>(
+      '.annotation-group-card[data-group-label="bicycle"] > [data-annotation-id]',
+    ),
+  ).toHaveLength(1);
+});
+
+it("activates a category to highlight all of its boxes and select the first", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n100 110 180 200 person 0\n0 0 10 10 bicycle 0"),
+  );
+  await screen.findByText("person", { exact: true });
+
+  await user.click(screen.getByText("person", { exact: true }));
+
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
+    "data-highlighted",
+    "true",
+  );
+  expect(screen.getByTestId("bbox-ann_002")).toHaveAttribute(
+    "data-highlighted",
+    "true",
+  );
+  expect(screen.getByTestId("bbox-ann_003")).toHaveAttribute(
+    "data-highlighted",
+    "false",
+  );
+});
+
+it("collapses and reopens a category from its header control", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  const panel = await screen.findByRole("complementary", {
+    name: "Annotations",
+  });
+  const toggle = screen.getByRole("button", { name: "Toggle person boxes" });
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const personCards = () =>
+    [
+      ...panel.querySelectorAll<HTMLElement>(
+        '.annotation-group-card[data-group-label="person"] > [data-annotation-id]',
+      ),
+    ].map((card) => card.dataset.annotationId);
+
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(personCards()).toEqual([]);
+
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(personCards()).toEqual(["ann_001"]);
+});
+
+it("reopens a collapsed category when its box is selected on the canvas", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n100 110 180 200 person 0"),
+  );
+  await screen.findByText("person", { exact: true });
+
+  await user.click(screen.getByRole("button", { name: "Toggle person boxes" }));
+  expect(
+    screen
+      .getByRole("complementary", { name: "Annotations" })
+      .querySelectorAll('.annotation-group-card[data-group-label="person"]'),
+  ).toHaveLength(0);
+
+  fireEvent.click(screen.getByTestId("bbox-ann_002"));
+
+  const panel = screen.getByRole("complementary", { name: "Annotations" });
+  expect(
+    panel.querySelectorAll<HTMLElement>(
+      '.annotation-group-card[data-group-label="person"] > [data-annotation-id]',
+    ),
+  ).toHaveLength(2);
+  expect(screen.getByTestId("bbox-ann_002")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+});
+
+it("highlights every box of a category while it is hovered", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n100 110 180 200 person 0\n0 0 10 10 bicycle 0"),
+  );
+  const panel = await screen.findByRole("complementary", {
+    name: "Annotations",
+  });
+  const personHeader = panel.querySelector<HTMLElement>(
+    '.annotation-group-header[data-group-label="person"]',
+  )!;
+
+  fireEvent.mouseEnter(personHeader);
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
+    "data-highlighted",
+    "true",
+  );
+  expect(screen.getByTestId("bbox-ann_002")).toHaveAttribute(
+    "data-highlighted",
+    "true",
+  );
+  expect(screen.getByTestId("bbox-ann_003")).toHaveAttribute(
+    "data-highlighted",
+    "false",
+  );
+
+  fireEvent.mouseLeave(personHeader);
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
+    "data-highlighted",
+    "false",
+  );
+});
+
+it("moves a box into another category after editing its expression", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  const panel = await screen.findByRole("complementary", {
+    name: "Annotations",
+  });
+  const expression = within(
+    panel.querySelector('[data-annotation-id="ann_001"]')!,
+  ).getByRole("textbox", { name: "Expression" });
+
+  await user.click(expression);
+  await user.clear(expression);
+  await user.type(expression, "bicycle");
+  await user.keyboard("{Enter}");
+
+  const groupLabels = [
+    ...panel.querySelectorAll<HTMLElement>(".annotation-group-header"),
+  ].map((header) => header.dataset.groupLabel);
+  expect(groupLabels).toEqual(["bicycle"]);
+  expect(
+    panel.querySelectorAll<HTMLElement>("[data-annotation-id]"),
+  ).toHaveLength(2);
+});
+
+it("keeps the editing card stable while its new label matches another category", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  const panel = await screen.findByRole("complementary", {
+    name: "Annotations",
+  });
+  const expression = within(
+    panel.querySelector('[data-annotation-id="ann_001"]')!,
+  ).getByRole("textbox", { name: "Expression" });
+
+  await user.click(expression);
+  await user.clear(expression);
+  await user.type(expression, "bicycle");
+
+  expect(expression).toHaveValue("bicycle");
+  const headers = () =>
+    [
+      ...panel.querySelectorAll<HTMLElement>(".annotation-group-header"),
+    ].map((header) => header.dataset.groupLabel);
+  expect(headers()).toEqual(["person", "bicycle"]);
+
+  await user.keyboard("{Enter}");
+  expect(headers()).toEqual(["bicycle"]);
+  expect(expression.isConnected).toBe(true);
+  expect(expression).toHaveValue("bicycle");
+});
+
+it("collapses and expands every category at once", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  const panel = await screen.findByRole("complementary", {
+    name: "Annotations",
+  });
+
+  await user.click(screen.getByRole("button", { name: "Collapse all" }));
+  expect(
+    panel.querySelectorAll<HTMLElement>("[data-annotation-id]"),
+  ).toHaveLength(0);
+  await expect(
+    screen.getByRole("button", { name: "Expand all" }),
+  ).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "Expand all" }));
+  expect(
+    panel.querySelectorAll<HTMLElement>("[data-annotation-id]"),
+  ).toHaveLength(2);
+  await expect(
+    screen.getByRole("button", { name: "Collapse all" }),
+  ).toBeVisible();
+});
+
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();

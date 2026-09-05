@@ -95,6 +95,19 @@ export const AnnotationCard = memo(function AnnotationCard({
     annotation.bbox.y2,
   ]);
 
+  // A card that unmounts (collapse, search filter, import) can no longer
+  // commit its numeric draft, so its pending marker must be released.
+  const unmountCleanupRef = useRef(onCoordinateDraftChange);
+  unmountCleanupRef.current = onCoordinateDraftChange;
+  const annotationIdRef = useRef(annotation.id);
+  annotationIdRef.current = annotation.id;
+  useEffect(
+    () => () => {
+      unmountCleanupRef.current?.(annotationIdRef.current, false);
+    },
+    [],
+  );
+
   const finishExpression = () => {
     if (!editingExpressionRef.current) return;
     editingExpressionRef.current = false;
@@ -184,7 +197,6 @@ export const AnnotationCard = memo(function AnnotationCard({
         <div>
           <strong>Annotation {index}</strong>
           <span className="annotation-id">{annotation.id}</span>
-          <span className="annotation-expression">{annotation.label}</span>
         </div>
         <button
           type="button"

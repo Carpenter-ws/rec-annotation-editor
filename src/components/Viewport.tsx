@@ -75,6 +75,7 @@ export interface ViewportProps {
   image: ImageInfo;
   annotations: readonly Annotation[];
   selectedId: string | null;
+  highlightedLabel?: string | null;
   dispatch: Dispatch<EditorAction>;
   onZoomChange: (scale: number) => void;
   mode: "select" | "add";
@@ -119,6 +120,7 @@ type PointerInteraction =
 interface AnnotationBoxProps {
   annotation: Annotation;
   selected: boolean;
+  highlighted: boolean;
   scale: number;
   onSelect: (event: MouseEvent<SVGGElement>) => void;
   onPointerDown: (event: PointerEvent<SVGGElement>) => void;
@@ -131,6 +133,7 @@ interface AnnotationBoxProps {
 function AnnotationBox({
   annotation,
   selected,
+  highlighted,
   scale,
   onSelect,
   onPointerDown,
@@ -165,9 +168,16 @@ function AnnotationBox({
         vectorEffect="non-scaling-stroke"
       />
       <rect
-        className={selected ? "annotation-bbox is-selected" : "annotation-bbox"}
+        className={[
+          "annotation-bbox",
+          selected ? "is-selected" : "",
+          highlighted ? "is-highlighted" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         data-testid={`bbox-${annotation.id}`}
         data-selected={selected ? "true" : "false"}
+        data-highlighted={highlighted ? "true" : "false"}
         x={x1}
         y={y1}
         width={width}
@@ -210,6 +220,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     image,
     annotations,
     selectedId,
+    highlightedLabel = null,
     dispatch,
     onZoomChange,
     mode,
@@ -667,6 +678,9 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
             key={annotation.id}
             annotation={annotation}
             selected={annotation.id === selectedId}
+            highlighted={
+              highlightedLabel !== null && annotation.label === highlightedLabel
+            }
             scale={transform.scale}
             onSelect={(event) => {
               event.stopPropagation();

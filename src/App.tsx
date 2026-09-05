@@ -144,6 +144,7 @@ function EditorWorkspace(): JSX.Element {
     ReadonlySet<string>
   >(() => new Set());
   const [panelOpen, setPanelOpen] = useState(false);
+  const [highlightedLabel, setHighlightedLabel] = useState<string | null>(null);
   const narrowLayout = useMediaQuery("(max-width: 900px)");
   const panelVisible = !narrowLayout || panelOpen;
   const viewportRef = useRef<ViewportHandle>(null);
@@ -232,6 +233,7 @@ function EditorWorkspace(): JSX.Element {
       }
       setDraftBBox(null);
       pendingCenterIdRef.current = null;
+      setHighlightedLabel(null);
       dispatch({ type: "SET_MODE", mode: "select" });
     }
     const generation = requestedGeneration ?? ++importGenerationRef.current;
@@ -585,6 +587,7 @@ function EditorWorkspace(): JSX.Element {
               image={state.image}
               annotations={state.annotations}
               selectedId={state.selectedId}
+              highlightedLabel={highlightedLabel}
               dispatch={dispatch}
               onZoomChange={setZoomScale}
               mode={state.mode}
@@ -622,6 +625,7 @@ function EditorWorkspace(): JSX.Element {
             dispatch={dispatch}
             onLocate={locateAnnotation}
             onCoordinateDraftChange={handleCoordinateDraftChange}
+            onHighlightLabel={setHighlightedLabel}
           />
         </aside>
       </main>
