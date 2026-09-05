@@ -23,6 +23,8 @@ export interface AnnotationPanelProps {
   activeLabel?: string | null;
   onActivateLabel?: (label: string) => void;
   onReset?: () => void;
+  /** Arm add-box mode so the next drawn box joins this category. */
+  onAddToCategory?: (label: string) => void;
 }
 
 interface AnnotationEntry {
@@ -48,6 +50,7 @@ export function AnnotationPanel({
   activeLabel = null,
   onActivateLabel,
   onReset,
+  onAddToCategory,
 }: AnnotationPanelProps): JSX.Element {
   const [query, setQuery] = useState("");
   const [activeExpressionId, setActiveExpressionId] = useState<string | null>(
@@ -297,6 +300,16 @@ export function AnnotationPanel({
                 <span className="annotation-group-count">
                   {group.entries.length}
                 </span>
+                <button
+                  type="button"
+                  className="annotation-group-add"
+                  aria-label={`Add ${group.label} box`}
+                  title={`Draw a new "${group.label}" box on the image`}
+                  disabled={bounds === null}
+                  onClick={() => onAddToCategory?.(group.label)}
+                >
+                  Add
+                </button>
               </header>,
             ];
             if (!collapsed) {

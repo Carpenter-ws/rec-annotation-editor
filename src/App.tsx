@@ -152,6 +152,9 @@ function EditorWorkspace(): JSX.Element {
   const [panelOpen, setPanelOpen] = useState(false);
   const [highlightedLabel, setHighlightedLabel] = useState<string | null>(null);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
+  const [draftLabel, setDraftLabel] = useState<string | null>(null);
+  const draftLabelRef = useRef(draftLabel);
+  draftLabelRef.current = draftLabel;
   const [labelPickerBlocked, setLabelPickerBlocked] = useState(false);
   const fallbackLabelInputRef = useRef<HTMLInputElement>(null);
   const narrowLayout = useMediaQuery("(max-width: 900px)");
@@ -177,6 +180,43 @@ function EditorWorkspace(): JSX.Element {
   const locateAnnotation = useCallback((id: string) => {
     viewportRef.current?.centerAnnotation(id);
   }, []);
+  const addAnnotation = useCallback(
+    (bbox: BBox, label: string) => {
+      const id = nextAnnotationId(stateRef.current.nextAnnotationNumber);
+      pendingCenterIdRef.current = id;
+      dispatch({
+        type: "ADD_ANNOTATION",
+        annotation: { id, bbox, label, reservedField: "0" },
+      });
+      dispatch({ type: "SELECT", id });
+    },
+    [dispatch],
+  );
+  // While a category "Add" is armed, every drawn box joins that category
+  // without opening the dialog, so several boxes can be added in a row.
+  const handleDraftBox = useCallback(
+    (bbox: BBox) => {
+      const label = draftLabelRef.current;
+      if (label !== null) {
+        addAnnotation(bbox, label);
+        return;
+      }
+      setDraftBBox(bbox);
+    },
+    [addAnnotation],
+  );
+  const handleAddToCategory = useCallback(
+    (label: string) => {
+      setDraftLabel(label);
+      setDraftBBox(null);
+      pendingCenterIdRef.current = null;
+      dispatch({ type: "SET_MODE", mode: "add" });
+      setNotice(
+        `Drag a box on the image to add "${label}" — press Esc to cancel.`,
+      );
+    },
+    [dispatch],
+  );
   const handleActivateLabel = useCallback(
     (label: string) => {
       setActiveLabel((current) => {
@@ -272,6 +312,7 @@ function EditorWorkspace(): JSX.Element {
       pendingCenterIdRef.current = null;
       setHighlightedLabel(null);
       setActiveLabel(null);
+      setDraftLabel(null);
       dispatch({ type: "SET_MODE", mode: "select" });
     }
     const generation = requestedGeneration ?? ++importGenerationRef.current;
@@ -409,13 +450,7 @@ function EditorWorkspace(): JSX.Element {
 
   const addDraftAnnotation = (label: string) => {
     if (!draftBBox) return;
-    const id = nextAnnotationId(state.nextAnnotationNumber);
-    pendingCenterIdRef.current = id;
-    dispatch({
-      type: "ADD_ANNOTATION",
-      annotation: { id, bbox: draftBBox, label, reservedField: "0" },
-    });
-    dispatch({ type: "SELECT", id });
+    addAnnotation(draftBBox, label);
     dispatch({ type: "SET_MODE", mode: "select" });
     setDraftBBox(null);
   };
@@ -573,6 +608,8 @@ function EditorWorkspace(): JSX.Element {
     },
     onEscape: () => {
       if (draftBBox === null && stateRef.current.mode === "add") {
+        setDraftLabel(null);
+        setNotice(null);
         dispatch({ type: "SET_MODE", mode: "select" });
       }
     },
@@ -610,7 +647,11 @@ function EditorWorkspace(): JSX.Element {
         onFit={() => viewportRef.current?.fit()}
         mode={state.mode}
         addBoxDisabled={state.image === null}
-        onAddBox={() => dispatch({ type: "SET_MODE", mode: "add" })}
+        onAddBox={() => {
+          setDraftLabel(null);
+          setNotice(null);
+          dispatch({ type: "SET_MODE", mode: "add" });
+        }}
         panelToggleVisible={narrowLayout}
         panelOpen={panelVisible}
         onTogglePanel={() => setPanelOpen((open) => !open)}
@@ -645,7 +686,7 @@ function EditorWorkspace(): JSX.Element {
               dispatch={dispatch}
               onZoomChange={setZoomScale}
               mode={state.mode}
-              onDraftBox={setDraftBBox}
+              onDraftBox={handleDraftBox}
             />
           ) : (
             <div className="workspace-empty">
@@ -683,6 +724,7 @@ function EditorWorkspace(): JSX.Element {
             activeLabel={activeLabel}
             onActivateLabel={handleActivateLabel}
             onReset={handleResetView}
+            onAddToCategory={handleAddToCategory}
           />
         </aside>
       </main>

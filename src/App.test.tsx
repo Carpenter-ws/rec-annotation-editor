@@ -3428,6 +3428,107 @@ it("downloads instead of writing when the retained handle is blocked", async () 
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
 });
 
+it("adds a category box directly from the panel without the dialog", async () => {
+  const user = userEvent.setup();
+  const reducer = vi.spyOn(editorReducerModule, "editorReducer");
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  await screen.findByText("person", { exact: true });
+  reducer.mockClear();
+
+  await user.click(screen.getByRole("button", { name: "Add person box" }));
+  expect(screen.getByRole("button", { name: "Add box" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByTestId("editor-notice")).toHaveTextContent(
+    /Drag a box on the image/i,
+  );
+
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+  const draw = (pointerId: number, from: [number, number], to: [number, number]) => {
+    fireEvent.pointerDown(canvas, {
+      pointerId,
+      clientX: from[0],
+      clientY: from[1],
+      button: 0,
+    });
+    fireEvent.pointerMove(canvas, {
+      pointerId,
+      clientX: to[0],
+      clientY: to[1],
+    });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: to[0], clientY: to[1] });
+  };
+  draw(30, [100, 100], [200, 200]);
+
+  expect(
+    screen.queryByRole("dialog", { name: "New annotation" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByTestId("bbox-ann_003")).toBeVisible();
+  expect(screen.getByTestId("bbox-ann_003")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+
+  // The view recenters on the new box, so draw near the canvas center.
+  draw(31, [450, 320], [560, 400]);
+  expect(screen.getByTestId("bbox-ann_004")).toBeVisible();
+
+  const addActions = reducer.mock.calls
+    .map(([, action]) => action)
+    .filter((action) => action.type === "ADD_ANNOTATION");
+  expect(addActions.map((action) => action.annotation.label)).toEqual([
+    "person",
+    "person",
+  ]);
+
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.getByRole("button", { name: "Add box" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+
+  // Once disarmed, the generic Add box flow asks for an expression again.
+  await user.click(screen.getByRole("button", { name: "Add box" }));
+  draw(32, [300, 250], [420, 330]);
+  expect(
+    await screen.findByRole("dialog", { name: "New annotation" }),
+  ).toBeVisible();
+});
+
+it("disables category add buttons until an image provides bounds", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  await screen.findByText("person", { exact: true });
+
+  expect(screen.getByRole("button", { name: "Add person box" })).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "Add bicycle box" }),
+  ).toBeDisabled();
+});
+
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();

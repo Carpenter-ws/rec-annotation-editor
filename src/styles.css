@@ -413,6 +413,30 @@ input,
   border-radius: 999px;
 }
 
+.annotation-group-add {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--space-xs);
+  cursor: pointer;
+}
+
+.annotation-group-add:hover:not(:disabled) {
+  color: #fff;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.annotation-group-add:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .annotation-group-card {
   margin-left: var(--space-lg);
 }

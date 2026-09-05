@@ -42,6 +42,9 @@ On Windows, run the script from Git Bash/WSL, or start the dev server directly:
      reveals every box, and re-fits the image;
    - collapse or reopen a category with its arrow, or use **Collapse all /
      Expand all**; the category of a selected box always reopens;
+   - **Add** on a category header draws a new box of that category: drag a
+     rectangle on the image and it joins the category immediately (no dialog);
+     keep drawing to add more, press `Esc` to stop;
    - click a box (or a card) to select it; the panel locates the matching card
      and vice versa;
    - drag a box to move it; drag a **corner** handle to resize it (both axes at
