@@ -50,6 +50,30 @@ function clampedFitTransform(
   };
 }
 
+/**
+ * Panning may never push the image fully out of the view: at least half of
+ * the scaled image must remain visible on both axes.
+ */
+function clampPanTransform(
+  transform: ViewTransform,
+  viewport: { width: number; height: number },
+  image: { width: number; height: number },
+): ViewTransform {
+  const halfWidth = (image.width * transform.scale) / 2;
+  const halfHeight = (image.height * transform.scale) / 2;
+  return {
+    ...transform,
+    offsetX: Math.min(
+      viewport.width - halfWidth,
+      Math.max(-halfWidth, transform.offsetX),
+    ),
+    offsetY: Math.min(
+      viewport.height - halfHeight,
+      Math.max(-halfHeight, transform.offsetY),
+    ),
+  };
+}
+
 function blurActiveExpressionTransactionOwner(): void {
   const activeElement = document.activeElement;
   if (
@@ -405,11 +429,17 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         const horizontal = event.shiftKey
           ? (event.deltaX !== 0 ? event.deltaX : event.deltaY)
           : event.deltaX;
-        setTransform({
-          ...transform,
-          offsetX: transform.offsetX - horizontal,
-          offsetY: transform.offsetY - (event.shiftKey ? 0 : event.deltaY),
-        });
+        setTransform(
+          clampPanTransform(
+            {
+              ...transform,
+              offsetX: transform.offsetX - horizontal,
+              offsetY: transform.offsetY - (event.shiftKey ? 0 : event.deltaY),
+            },
+            viewportSizeRef.current,
+            image,
+          ),
+        );
       }
       fitModeRef.current = false;
     };
@@ -470,11 +500,17 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       const deltaX = point.x - interaction.startViewport.x;
       const deltaY = point.y - interaction.startViewport.y;
       if (deltaX !== 0 || deltaY !== 0) interactionMovedRef.current = true;
-      setTransform({
-        ...interaction.startTransform,
-        offsetX: interaction.startTransform.offsetX + deltaX,
-        offsetY: interaction.startTransform.offsetY + deltaY,
-      });
+      setTransform(
+        clampPanTransform(
+          {
+            ...interaction.startTransform,
+            offsetX: interaction.startTransform.offsetX + deltaX,
+            offsetY: interaction.startTransform.offsetY + deltaY,
+          },
+          viewportSizeRef.current,
+          image,
+        ),
+      );
       return;
     }
 

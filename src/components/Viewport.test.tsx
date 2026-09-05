@@ -1188,6 +1188,42 @@ it("pans the view horizontally with Shift+wheel", () => {
   expect(imageSpace).toHaveAttribute("data-offset-y", "30");
 });
 
+it("clamps panning so at least half of the image stays visible", () => {
+  renderViewport({
+    initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },
+  });
+  const canvas = screen.getByLabelText("Annotation canvas");
+  const imageSpace = screen.getByTestId("image-space");
+  // Half of the scaled image is 480 x 270, so the allowed ranges are
+  // offsetX in [-480, 520] and offsetY in [-270, 430].
+
+  act(() => {
+    canvas.dispatchEvent(
+      new WheelEvent("wheel", { deltaY: 100_000, cancelable: true }),
+    );
+  });
+  expect(imageSpace).toHaveAttribute("data-offset-y", "-270");
+  expect(imageSpace).toHaveAttribute("data-offset-x", "20");
+
+  act(() => {
+    canvas.dispatchEvent(
+      new WheelEvent("wheel", { deltaX: -100_000, cancelable: true }),
+    );
+  });
+  expect(imageSpace).toHaveAttribute("data-offset-x", "520");
+
+  act(() => {
+    canvas.dispatchEvent(
+      new WheelEvent("wheel", {
+        deltaX: 100_000,
+        shiftKey: true,
+        cancelable: true,
+      }),
+    );
+  });
+  expect(imageSpace).toHaveAttribute("data-offset-x", "-480");
+});
+
 it("pans with the middle button while holding pointer capture", () => {
   renderViewport({
     initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },

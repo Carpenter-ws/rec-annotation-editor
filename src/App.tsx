@@ -155,6 +155,10 @@ function EditorWorkspace(): JSX.Element {
   const [draftLabel, setDraftLabel] = useState<string | null>(null);
   const draftLabelRef = useRef(draftLabel);
   draftLabelRef.current = draftLabel;
+  const [toast, setToast] = useState<{ key: number; message: string } | null>(
+    null,
+  );
+  const toastTimerRef = useRef<number | null>(null);
   const [labelPickerBlocked, setLabelPickerBlocked] = useState(false);
   const fallbackLabelInputRef = useRef<HTMLInputElement>(null);
   const narrowLayout = useMediaQuery("(max-width: 900px)");
@@ -166,7 +170,6 @@ function EditorWorkspace(): JSX.Element {
   const mountedRef = useRef(true);
   const acceptedImageUrlRef = useRef<string | null>(null);
   const labelHandleRef = useRef<FileSystemFileHandle | null>(null);
-  const pendingCenterIdRef = useRef<string | null>(null);
   stateRef.current = state;
   const effectiveDirty = state.dirty || pendingCoordinateIds.size > 0;
   useUnsavedWarning(effectiveDirty);
@@ -180,17 +183,28 @@ function EditorWorkspace(): JSX.Element {
   const locateAnnotation = useCallback((id: string) => {
     viewportRef.current?.centerAnnotation(id);
   }, []);
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToast({ key: Date.now(), message });
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, 4000);
+  }, []);
   const addAnnotation = useCallback(
     (bbox: BBox, label: string) => {
       const id = nextAnnotationId(stateRef.current.nextAnnotationNumber);
-      pendingCenterIdRef.current = id;
       dispatch({
         type: "ADD_ANNOTATION",
         annotation: { id, bbox, label, reservedField: "0" },
       });
       dispatch({ type: "SELECT", id });
+      // Deliberately no camera movement: the view stays where the user drew.
+      showToast(`Added "${label}" (${id}).`);
     },
-    [dispatch],
+    [dispatch, showToast],
   );
   // While a category "Add" is armed, every drawn box joins that category
   // without opening the dialog, so several boxes can be added in a row.
@@ -209,11 +223,8 @@ function EditorWorkspace(): JSX.Element {
     (label: string) => {
       setDraftLabel(label);
       setDraftBBox(null);
-      pendingCenterIdRef.current = null;
       dispatch({ type: "SET_MODE", mode: "add" });
-      setNotice(
-        `Drag a box on the image to add "${label}" — press Esc to cancel.`,
-      );
+      setNotice(null);
     },
     [dispatch],
   );
@@ -266,22 +277,11 @@ function EditorWorkspace(): JSX.Element {
       const acceptedUrl = acceptedImageUrlRef.current;
       acceptedImageUrlRef.current = null;
       if (acceptedUrl) URL.revokeObjectURL(acceptedUrl);
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
     };
   }, []);
-
-  useEffect(() => {
-    const id = pendingCenterIdRef.current;
-    if (
-      id === null ||
-      state.selectedId !== id ||
-      !state.annotations.some((annotation) => annotation.id === id)
-    ) {
-      return;
-    }
-
-    viewportRef.current?.centerAnnotation(id);
-    pendingCenterIdRef.current = null;
-  }, [state.annotations, state.selectedId]);
 
   useEffect(() => {
     const annotationIds = new Set(
@@ -309,7 +309,6 @@ function EditorWorkspace(): JSX.Element {
         activeElement.blur();
       }
       setDraftBBox(null);
-      pendingCenterIdRef.current = null;
       setHighlightedLabel(null);
       setActiveLabel(null);
       setDraftLabel(null);
@@ -675,6 +674,23 @@ function EditorWorkspace(): JSX.Element {
           }}
           onDrop={handleDrop}
         >
+          {state.mode === "add" ? (
+            <div className="add-mode-banner" data-testid="add-mode-banner">
+              {draftLabel
+                ? `Draw a rectangle on the image to add a "${draftLabel}" box — press Esc to exit`
+                : "Draw a rectangle on the image to add a box — press Esc to exit"}
+            </div>
+          ) : null}
+          {toast ? (
+            <div
+              key={toast.key}
+              className="add-toast"
+              aria-live="polite"
+              data-testid="add-toast"
+            >
+              {toast.message}
+            </div>
+          ) : null}
           {state.image ? (
             <Viewport
               ref={viewportRef}

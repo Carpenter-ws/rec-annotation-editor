@@ -366,7 +366,7 @@ it("rejects an empty trimmed expression in the new-annotation dialog", async () 
   expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
 });
 
-it("adds, selects, and centers a trimmed original-coordinate annotation", async () => {
+it("adds and selects a trimmed original-coordinate annotation without moving the view", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 1000, height: 1000 }]);
@@ -442,17 +442,14 @@ it("adds, selects, and centers a trimmed original-coordinate annotation", async 
     { type: "SET_MODE", mode: "select" },
   ]);
 
-  await waitFor(() => {
-    expect(
-      Number(screen.getByTestId("image-space").getAttribute("data-scale")),
-    ).toBeCloseTo(2.45, 10);
-  });
-  expect(
-    Number(screen.getByTestId("image-space").getAttribute("data-offset-x")),
-  ).toBeCloseTo(132.5, 10);
-  expect(
-    Number(screen.getByTestId("image-space").getAttribute("data-offset-y")),
-  ).toBeCloseTo(-17.5, 10);
+  // Adding a box must never move the view: the fit transform stays untouched.
+  const imageSpace = screen.getByTestId("image-space");
+  expect(Number(imageSpace.getAttribute("data-scale"))).toBeCloseTo(0.7, 10);
+  expect(Number(imageSpace.getAttribute("data-offset-x"))).toBeCloseTo(150, 10);
+  expect(Number(imageSpace.getAttribute("data-offset-y"))).toBeCloseTo(0, 10);
+  expect(screen.getByTestId("add-toast")).toHaveTextContent(
+    'Added "vehicle" (ann_001)',
+  );
 });
 
 it("uses the reducer next annotation number after importing annotations", async () => {
@@ -3452,9 +3449,10 @@ it("adds a category box directly from the panel without the dialog", async () =>
     "aria-pressed",
     "true",
   );
-  expect(screen.getByTestId("editor-notice")).toHaveTextContent(
-    /Drag a box on the image/i,
-  );
+  const banner = screen.getByTestId("add-mode-banner");
+  expect(banner).toHaveTextContent(/Draw a rectangle on the image/i);
+  expect(banner).toHaveTextContent(/person/);
+  expect(banner).toHaveTextContent(/Esc/);
 
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
@@ -3486,10 +3484,16 @@ it("adds a category box directly from the panel without the dialog", async () =>
     "data-selected",
     "true",
   );
+  expect(screen.getByTestId("add-toast")).toHaveTextContent(
+    'Added "person" (ann_003)',
+  );
+  const imageSpace = screen.getByTestId("image-space");
+  const transformAfterAdd = imageSpace.getAttribute("transform");
 
-  // The view recenters on the new box, so draw near the canvas center.
-  draw(31, [450, 320], [560, 400]);
+  // The view must stay put so several boxes can be drawn in a row.
+  draw(31, [100, 100], [200, 200]);
   expect(screen.getByTestId("bbox-ann_004")).toBeVisible();
+  expect(imageSpace.getAttribute("transform")).toBe(transformAfterAdd);
 
   const addActions = reducer.mock.calls
     .map(([, action]) => action)

@@ -152,6 +152,9 @@ test("edits a complete REC document without coordinate drift", async ({
     .fill("the vehicle in the newly drawn region");
   await dialog.getByRole("button", { name: "Add" }).click();
   await expect(cards).toHaveCount(25);
+  await expect(page.getByTestId("add-toast")).toContainText(
+    'Added "the vehicle in the newly drawn region"',
+  );
 
   // Delete, Undo, and Redo the new annotation.
   await page
