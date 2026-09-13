@@ -3747,6 +3747,187 @@ it("scales normalized JSONL labels once their image arrives later", async () => 
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("height", "300");
 });
 
+function mockDatasetNavigation(
+  items: datasetApi.DatasetItem[],
+  labelsByFile: Record<string, string>,
+) {
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items }]);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const file = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+      return new Response(
+        labelsByFile[file] ?? '{"expression": "unknown", "targets": [[1, 1, 2, 2]]}',
+        { status: 200 },
+      );
+    }),
+  );
+}
+
+const threeDatasetItems: datasetApi.DatasetItem[] = [
+  { stem: "a", image: "a.jpg", labels: "a.jsonl" },
+  { stem: "b", image: "b.jpg", labels: "b.jsonl" },
+  { stem: "c", image: "c.jpg", labels: "c.jsonl" },
+];
+const threeLabelFiles: Record<string, string> = {
+  "a.jsonl": '{"expression": "alpha", "targets": [[10, 10, 110, 110]]}',
+  "b.jsonl": '{"expression": "beta", "targets": [[20, 20, 120, 120]]}',
+  "c.jsonl": '{"expression": "gamma", "targets": [[30, 30, 130, 130]]}',
+};
+
+async function openDatasetStem(
+  user: ReturnType<typeof userEvent.setup>,
+  stem: string,
+): Promise<void> {
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+  const row = dialog.querySelector<HTMLElement>(
+    `[data-item-stem="${stem}"]`,
+  );
+  if (!row) throw new Error(`missing dataset item row for ${stem}`);
+  await user.click(within(row).getByRole("button", { name: "Open" }));
+}
+
+it("switches between dataset items with previous and next", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  mockDatasetNavigation(threeDatasetItems, threeLabelFiles);
+  render(<App />);
+
+  await openDatasetStem(user, "b");
+
+  expect(await screen.findByDisplayValue("beta")).toBeVisible();
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 3");
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("b.jpg");
+
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+
+  expect(await screen.findByDisplayValue("gamma")).toBeVisible();
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("c.jpg");
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("3 / 3");
+  expect(screen.getByRole("button", { name: "Next image" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Previous image" })).toBeEnabled();
+
+  await user.click(screen.getByRole("button", { name: "Previous image" }));
+  await user.click(screen.getByRole("button", { name: "Previous image" }));
+
+  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 3");
+  expect(screen.getByRole("button", { name: "Previous image" })).toBeDisabled();
+});
+
+it("skips dataset items that are missing an image or a label file", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  mockDatasetNavigation(
+    [
+      { stem: "a", image: "a.jpg", labels: "a.jsonl" },
+      { stem: "b", image: "b.jpg", labels: null },
+      { stem: "c", image: "c.jpg", labels: "c.jsonl" },
+    ],
+    threeLabelFiles,
+  );
+  render(<App />);
+
+  await openDatasetStem(user, "a");
+  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+  expect(screen.getByLabelText("Dataset position")).toHaveTextContent("1 / 2");
+
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+
+  expect(await screen.findByDisplayValue("gamma")).toBeVisible();
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 2");
+});
+
+it("hides dataset navigation when no dataset item is open", () => {
+  render(<App />);
+
+  expect(
+    screen.queryByRole("button", { name: "Next image" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Previous image" }),
+  ).not.toBeInTheDocument();
+});
+
+it("asks before discarding unsaved edits when switching dataset items", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  mockDatasetNavigation(threeDatasetItems, threeLabelFiles);
+  render(<App />);
+
+  await openDatasetStem(user, "a");
+  const expression = await screen.findByDisplayValue("alpha");
+  await user.clear(expression);
+  await user.type(expression, "changed{Enter}");
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+
+  const confirm = await screen.findByRole("dialog", {
+    name: "Discard unsaved changes?",
+  });
+  expect(confirm).toBeVisible();
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
+
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(
+    screen.queryByRole("dialog", { name: "Discard unsaved changes?" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByDisplayValue("changed")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Discard and switch" }),
+  );
+
+  expect(await screen.findByDisplayValue("beta")).toBeVisible();
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 3");
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
+it("moves between dataset items with Alt+Arrow keys", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  mockDatasetNavigation(threeDatasetItems, threeLabelFiles);
+  render(<App />);
+
+  await openDatasetStem(user, "a");
+  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
+  expect(await screen.findByDisplayValue("beta")).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
+  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+});
+
 it("uploads image and label pairs into a dataset", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);

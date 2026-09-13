@@ -73,6 +73,7 @@ resizing only change the view; they never rewrite box data.
 | `Ctrl/Cmd + Z` | Undo |
 | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` | Redo |
 | `Delete` / `Backspace` | Delete the selected annotation |
+| `Alt + ←` / `Alt + →` | Previous / next image of the open dataset |
 | `Escape` | Leave Add box mode / cancel a dialog or drag |
 | `Ctrl/Cmd` + mouse wheel | Zoom around the cursor |
 | Mouse wheel | Pan the image up/down |
@@ -97,6 +98,13 @@ backend):
 - **Open** — loads the image and its labels straight from disk, so nothing has
   to be re-uploaded next session. Edits are stored back into the dataset with
   **Save**.
+- **‹ Previous / Next ›** — once an item is open, the toolbar switches to the
+  neighbouring image of the same dataset and shows the position (`3 / 12`).
+  Items missing an image or a label file are skipped. Keyboard equivalents are
+  `Alt + ←` / `Alt + →`. **Save** always writes back to the labels file of the
+  item shown in the toolbar. Switching with unsaved edits asks first
+  (**Keep editing** / **Discard and switch**) — edits are never dropped
+  silently.
 - **Confirm import** closes the dialog; items, files, and edits stay on disk.
 - Delete items or whole datasets from the same dialog.
 

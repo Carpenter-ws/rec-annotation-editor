@@ -13,7 +13,12 @@ import {
 export interface DatasetDialogProps {
   open: boolean;
   onClose: () => void;
-  onOpenItem: (datasetName: string, item: DatasetItem) => void;
+  /** `items` carries the whole dataset so the editor can navigate siblings. */
+  onOpenItem: (
+    datasetName: string,
+    item: DatasetItem,
+    items: readonly DatasetItem[],
+  ) => void;
 }
 
 export function DatasetDialog({
@@ -269,7 +274,7 @@ export function DatasetDialog({
                                       : "Upload both the image and its label file first"
                                   }
                                   onClick={() => {
-                                    onOpenItem(dataset.name, item);
+                                    onOpenItem(dataset.name, item, dataset.items);
                                   }}
                                 >
                                   Open

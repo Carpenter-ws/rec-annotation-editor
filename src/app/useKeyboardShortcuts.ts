@@ -6,6 +6,9 @@ export interface KeyboardShortcutHandlers {
   onSave: () => void;
   onDelete: () => void;
   onEscape: () => void;
+  /** Alt+ArrowLeft / Alt+ArrowRight dataset navigation. */
+  onPreviousItem?: () => void;
+  onNextItem?: () => void;
 }
 
 export function isEditableTarget(target: EventTarget | null): boolean {
@@ -61,6 +64,18 @@ export function useKeyboardShortcuts(
       if (event.key === "Escape") {
         event.preventDefault();
         handlersRef.current.onEscape();
+        return;
+      }
+      if (event.altKey && !commandKey) {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          handlersRef.current.onPreviousItem?.();
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          handlersRef.current.onNextItem?.();
+        }
       }
     };
 

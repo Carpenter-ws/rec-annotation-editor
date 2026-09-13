@@ -112,14 +112,16 @@ input,
 
 .toolbar-files,
 .zoom-controls,
-.export-controls {
+.export-controls,
+.dataset-nav {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-xs);
 }
 
-.zoom-controls {
+.zoom-controls,
+.dataset-nav {
   padding: 2px;
   background: #212a34;
   border: 1px solid #35414f;
@@ -129,6 +131,18 @@ input,
   min-width: 52px;
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+
+.dataset-nav output {
+  min-width: 48px;
+  font-size: 12px;
+  color: #a9b6c4;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.dataset-nav button:disabled {
+  opacity: 0.4;
 }
 
 .export-controls [role="menu"] {
@@ -808,6 +822,62 @@ input,
 .dataset-dialog-footer {
   display: flex;
   justify-content: flex-end;
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgb(9 13 18 / 62%);
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.confirm-dialog p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.confirm-actions button {
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.confirm-actions button:last-child {
+  color: #fff;
+  background: var(--accent-strong);
+  border-color: var(--accent);
 }
 
 .error-dialog-backdrop,

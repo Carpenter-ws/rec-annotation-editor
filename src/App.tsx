@@ -31,6 +31,7 @@ import {
 } from "./app/useKeyboardShortcuts";
 import { useUnsavedWarning } from "./app/useUnsavedWarning";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DatasetDialog } from "./components/DatasetDialog";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
 import { AnnotationPanel } from "./components/AnnotationPanel";
@@ -76,6 +77,21 @@ interface ClampedAnnotations {
   annotations: Annotation[];
   count: number;
   invalid: Annotation | null;
+}
+
+/** The dataset item currently open in the editor, plus its siblings. */
+interface DatasetView {
+  dataset: string;
+  stem: string;
+  labelsFile: string;
+  items: readonly DatasetItem[];
+}
+
+interface DatasetNavigation {
+  position: number;
+  total: number;
+  canGoPrevious: boolean;
+  canGoNext: boolean;
 }
 
 function sameBBox(a: Annotation["bbox"], b: Annotation["bbox"]): boolean {
@@ -174,10 +190,10 @@ function EditorWorkspace(): JSX.Element {
   const draftLabelRef = useRef(draftLabel);
   draftLabelRef.current = draftLabel;
   const [datasetDialogOpen, setDatasetDialogOpen] = useState(false);
-  const datasetContextRef = useRef<{
-    dataset: string;
-    labelsFile: string;
-  } | null>(null);
+  const [datasetView, setDatasetView] = useState<DatasetView | null>(null);
+  /** Mirrors `datasetView` for callbacks that must not wait for a render. */
+  const datasetViewRef = useRef<DatasetView | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<DatasetItem | null>(null);
   /** JSONL labels whose normalized targets still await an image size. */
   const normalizedSourceRef = useRef(false);
   const [toast, setToast] = useState<{ key: number; message: string } | null>(
@@ -197,6 +213,8 @@ function EditorWorkspace(): JSX.Element {
   const labelHandleRef = useRef<FileSystemFileHandle | null>(null);
   stateRef.current = state;
   const effectiveDirty = state.dirty || pendingCoordinateIds.size > 0;
+  const effectiveDirtyRef = useRef(false);
+  effectiveDirtyRef.current = effectiveDirty;
   useUnsavedWarning(effectiveDirty);
   const imageBounds = useMemo<ImageBounds | null>(
     () =>
@@ -282,7 +300,11 @@ function EditorWorkspace(): JSX.Element {
     viewportRef.current?.fit();
   }, [dispatch]);
   const openDatasetItem = useCallback(
-    async (datasetName: string, item: DatasetItem) => {
+    async (
+      datasetName: string,
+      item: DatasetItem,
+      siblings: readonly DatasetItem[] = [],
+    ) => {
       const labelsFile = item.labels;
       const imageFile = item.image;
       if (!labelsFile || !imageFile) {
@@ -351,10 +373,14 @@ function EditorWorkspace(): JSX.Element {
           : parsed.annotations;
         normalizedSourceRef.current = false;
 
-        datasetContextRef.current = {
+        const view: DatasetView = {
           dataset: datasetName,
+          stem: item.stem,
           labelsFile,
+          items: siblings.length > 0 ? siblings : [item],
         };
+        datasetViewRef.current = view;
+        setDatasetView(view);
         dispatch({
           type: "COMMIT_IMPORT",
           image,
@@ -546,7 +572,8 @@ function EditorWorkspace(): JSX.Element {
 
     if (files.labels) {
       labelHandleRef.current = labelHandle;
-      datasetContextRef.current = null;
+      datasetViewRef.current = null;
+      setDatasetView(null);
     }
 
     if (loadedImage) {
@@ -637,6 +664,55 @@ function EditorWorkspace(): JSX.Element {
     }
   };
 
+  const readyDatasetItems = useMemo(
+    () =>
+      datasetView
+        ? datasetView.items.filter((item) => item.image && item.labels)
+        : [],
+    [datasetView],
+  );
+  const datasetNavigation = useMemo<DatasetNavigation | null>(() => {
+    if (!datasetView) return null;
+    const index = readyDatasetItems.findIndex(
+      (item) => item.stem === datasetView.stem,
+    );
+    if (index < 0) return null;
+    return {
+      position: index + 1,
+      total: readyDatasetItems.length,
+      canGoPrevious: index > 0,
+      canGoNext: index < readyDatasetItems.length - 1,
+    };
+  }, [datasetView, readyDatasetItems]);
+  const switchToDatasetItem = useCallback(
+    (target: DatasetItem) => {
+      const view = datasetViewRef.current;
+      if (!view) return;
+      setPendingSwitch(null);
+      void openDatasetItem(view.dataset, target, view.items);
+    },
+    [openDatasetItem],
+  );
+  const stepDatasetItem = useCallback(
+    (direction: -1 | 1) => {
+      const view = datasetViewRef.current;
+      if (!view) return;
+      const ready = view.items.filter((item) => item.image && item.labels);
+      const index = ready.findIndex((item) => item.stem === view.stem);
+      if (index < 0) return;
+      const target = ready[index + direction];
+      if (!target) return;
+      // Unsaved edits are never dropped silently.
+      if (effectiveDirtyRef.current) {
+        setPendingSwitch(target);
+        return;
+      }
+      setPendingSwitch(null);
+      void openDatasetItem(view.dataset, target, view.items);
+    },
+    [openDatasetItem],
+  );
+
   const save = async () => {
     const latestState = stateRef.current;
     const snapshot = latestState.annotations;
@@ -652,8 +728,8 @@ function EditorWorkspace(): JSX.Element {
       const contents = saveJsonl
         ? serializeAnnotationsJsonl(snapshot, jsonlScale)
         : serializeAnnotationsTxt(snapshot);
-      if (datasetContextRef.current) {
-        const { dataset, labelsFile } = datasetContextRef.current;
+      if (datasetViewRef.current) {
+        const { dataset, labelsFile } = datasetViewRef.current;
         try {
           await saveDatasetLabels(dataset, labelsFile, contents);
           setNotice(`Saved "${labelsFile}" to dataset "${dataset}".`);
@@ -788,6 +864,8 @@ function EditorWorkspace(): JSX.Element {
   };
 
   useKeyboardShortcuts({
+    onPreviousItem: () => runAfterEditorBlur(() => stepDatasetItem(-1)),
+    onNextItem: () => runAfterEditorBlur(() => stepDatasetItem(1)),
     onUndo: () =>
       runAfterEditorBlur(() => dispatch({ type: "UNDO" })),
     onRedo: () =>
@@ -850,6 +928,9 @@ function EditorWorkspace(): JSX.Element {
         panelToggleVisible={narrowLayout}
         panelOpen={panelVisible}
         onTogglePanel={() => setPanelOpen((open) => !open)}
+        datasetNavigation={datasetNavigation}
+        onPreviousItem={() => stepDatasetItem(-1)}
+        onNextItem={() => stepDatasetItem(1)}
       />
       <main className="editor-layout">
         <section
@@ -957,11 +1038,21 @@ function EditorWorkspace(): JSX.Element {
         issues={errorReport?.issues ?? []}
         onClose={() => setErrorReport(null)}
       />
+      {pendingSwitch && datasetView ? (
+        <ConfirmDialog
+          title="Discard unsaved changes?"
+          message={`"${datasetView.stem}" has unsaved changes. Switching to "${pendingSwitch.stem}" discards them.`}
+          confirmLabel="Discard and switch"
+          cancelLabel="Keep editing"
+          onConfirm={() => switchToDatasetItem(pendingSwitch)}
+          onCancel={() => setPendingSwitch(null)}
+        />
+      ) : null}
       <DatasetDialog
         open={datasetDialogOpen}
         onClose={() => setDatasetDialogOpen(false)}
-        onOpenItem={(datasetName, item) =>
-          void openDatasetItem(datasetName, item)
+        onOpenItem={(datasetName, item, items) =>
+          void openDatasetItem(datasetName, item, items)
         }
       />
       <input

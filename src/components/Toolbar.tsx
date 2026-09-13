@@ -28,6 +28,15 @@ export interface ToolbarProps {
   panelToggleVisible: boolean;
   panelOpen: boolean;
   onTogglePanel: () => void;
+  /** Present only while a dataset item is open. */
+  datasetNavigation: {
+    position: number;
+    total: number;
+    canGoPrevious: boolean;
+    canGoNext: boolean;
+  } | null;
+  onPreviousItem: () => void;
+  onNextItem: () => void;
 }
 
 export function Toolbar({
@@ -58,6 +67,9 @@ export function Toolbar({
   panelToggleVisible,
   panelOpen,
   onTogglePanel,
+  datasetNavigation,
+  onPreviousItem,
+  onNextItem,
 }: ToolbarProps): JSX.Element {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
@@ -111,6 +123,33 @@ export function Toolbar({
           Datasets
         </button>
       </div>
+      {datasetNavigation ? (
+        <div className="dataset-nav" aria-label="Dataset navigation">
+          <button
+            type="button"
+            aria-label="Previous image"
+            disabled={!datasetNavigation.canGoPrevious}
+            onClick={onPreviousItem}
+          >
+            ‹ Previous
+          </button>
+          <output
+            role="presentation"
+            data-testid="dataset-position"
+            aria-label="Dataset position"
+          >
+            {datasetNavigation.position} / {datasetNavigation.total}
+          </output>
+          <button
+            type="button"
+            aria-label="Next image"
+            disabled={!datasetNavigation.canGoNext}
+            onClick={onNextItem}
+          >
+            Next ›
+          </button>
+        </div>
+      ) : null}
       <div className="toolbar-file-names" aria-label="Open files">
         <span>{imageName ?? "No image"}</span>
         <span>{labelFileName ?? "No labels"}</span>
