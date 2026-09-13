@@ -746,11 +746,31 @@ input,
   gap: var(--space-sm);
 }
 
+.dataset-summary,
 .dataset-warning,
 .dataset-empty {
   margin: 0;
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dataset-warning {
   color: var(--warning);
+}
+
+.dataset-item-state {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--warning);
+}
+
+.dataset-item-state.is-ready {
+  color: var(--accent-strong);
+}
+
+.dataset-item-list button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .dataset-empty {

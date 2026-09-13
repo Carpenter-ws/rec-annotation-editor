@@ -280,10 +280,14 @@ function EditorWorkspace(): JSX.Element {
   }, [dispatch]);
   const openDatasetItem = useCallback(
     async (datasetName: string, item: DatasetItem) => {
-      if (!item.labels) {
+      const labelsFile = item.labels;
+      const imageFile = item.image;
+      if (!labelsFile || !imageFile) {
         setErrorReport({
           title: "Could not open dataset item",
-          issues: [`"${item.stem}" has no label file.`],
+          issues: [
+            `"${item.stem}" needs both an image and a label file. Upload the missing half first.`,
+          ],
         });
         return;
       }
@@ -308,7 +312,7 @@ function EditorWorkspace(): JSX.Element {
         setNotice(null);
 
         const labelsResponse = await fetch(
-          datasetLabelsUrl(datasetName, item.labels),
+          datasetLabelsUrl(datasetName, labelsFile),
         );
         if (!labelsResponse.ok) {
           throw new Error(
@@ -318,7 +322,7 @@ function EditorWorkspace(): JSX.Element {
         const text = await labelsResponse.text();
         if (!isCurrent()) return;
 
-        const parsed = isJsonlLabelFile(item.labels)
+        const parsed = isJsonlLabelFile(labelsFile)
           ? parseJsonlAnnotations(text)
           : parseAnnotationText(text);
         if (parsed.issues.length > 0) {
@@ -330,21 +334,21 @@ function EditorWorkspace(): JSX.Element {
         }
 
         const image = await loadImageFromUrl(
-          datasetImageUrl(datasetName, item.image),
-          item.image,
+          datasetImageUrl(datasetName, imageFile),
+          imageFile,
         );
         if (!isCurrent()) return;
 
         datasetContextRef.current = {
           dataset: datasetName,
-          labelsFile: item.labels,
+          labelsFile,
         };
         dispatch({
           type: "COMMIT_IMPORT",
           image,
           annotationBaseline: {
             annotations: parsed.annotations,
-            fileName: item.labels,
+            fileName: labelsFile,
           },
         });
         setDatasetDialogOpen(false);

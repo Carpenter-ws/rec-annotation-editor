@@ -5,7 +5,9 @@ import type { Plugin } from "vite";
 
 export interface ManifestItem {
   stem: string;
-  image: string;
+  /** File name once uploaded, or null while only labels exist. */
+  image: string | null;
+  /** File name once uploaded, or null while only the image exists. */
   labels: string | null;
 }
 
@@ -275,50 +277,52 @@ export function createDatasetMiddleware(rootDir: string) {
           const image = item.image;
           const labels = item.labels;
           if (
-            !image?.name ||
-            !image.data ||
-            !labels?.name ||
-            typeof labels.text !== "string"
+            (!image || !image.name || !image.data) &&
+            (!labels || !labels.name || typeof labels.text !== "string")
           ) {
-            sendError(res, 400, "each item needs an image and a label file");
+            sendError(
+              res,
+              400,
+              "each item needs an image, a label file, or both",
+            );
             return;
           }
-          const imageExt = path.extname(image.name).toLowerCase();
-          const labelsExt = path.extname(labels.name).toLowerCase();
-          if (!IMAGE_EXTENSIONS.has(imageExt)) {
-            sendError(res, 400, `unsupported image type: ${image.name}`);
-            return;
+          if (image?.name) {
+            if (!IMAGE_EXTENSIONS.has(path.extname(image.name).toLowerCase())) {
+              sendError(res, 400, `unsupported image type: ${image.name}`);
+              return;
+            }
+            const imagePath = resolveWithin(datasetDir, "images", image.name);
+            if (imagePath === null) {
+              sendError(res, 400, "invalid image file name");
+              return;
+            }
+            fs.writeFileSync(
+              imagePath,
+              Buffer.from(image.data ?? "", "base64"),
+            );
           }
-          if (!LABEL_EXTENSIONS.has(labelsExt)) {
-            sendError(res, 400, `unsupported label type: ${labels.name}`);
-            return;
+          if (labels?.name) {
+            if (!LABEL_EXTENSIONS.has(path.extname(labels.name).toLowerCase())) {
+              sendError(res, 400, `unsupported label type: ${labels.name}`);
+              return;
+            }
+            const labelsPath = resolveWithin(datasetDir, "labels", labels.name);
+            if (labelsPath === null) {
+              sendError(res, 400, "invalid label file name");
+              return;
+            }
+            fs.writeFileSync(labelsPath, labels.text ?? "", "utf8");
           }
-          const stem = stemOf(image.name);
-          fs.writeFileSync(
-            resolveWithin(datasetDir, "images", image.name) ??
-              (() => {
-                throw new Error("invalid file name");
-              })(),
-            Buffer.from(image.data, "base64"),
-          );
-          fs.writeFileSync(
-            resolveWithin(datasetDir, "labels", labels.name) ??
-              (() => {
-                throw new Error("invalid file name");
-              })(),
-            labels.text,
-            "utf8",
-          );
-          const existing = manifest.items.find(
-            (entry) => entry.stem === stem,
-          );
-          if (existing) existing.labels = labels.name;
-          else
-            manifest.items.push({
-              stem,
-              image: image.name,
-              labels: labels.name,
-            });
+
+          const stem = stemOf(image?.name ?? labels?.name ?? "");
+          let existing = manifest.items.find((entry) => entry.stem === stem);
+          if (!existing) {
+            existing = { stem, image: null, labels: null };
+            manifest.items.push(existing);
+          }
+          if (image?.name) existing.image = image.name;
+          if (labels?.name) existing.labels = labels.name;
         }
         writeManifest(datasetDir, manifest);
         sendJson(res, 200, manifest);

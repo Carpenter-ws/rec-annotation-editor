@@ -4,7 +4,7 @@ import {
   deleteDataset,
   deleteDatasetItem,
   listDatasets,
-  pairDatasetFiles,
+  planDatasetUpload,
   uploadDatasetItems,
   type DatasetItem,
   type DatasetSummary,
@@ -26,6 +26,7 @@ export function DatasetDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [expandedName, setExpandedName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -49,6 +50,7 @@ export function DatasetDialog({
     setExpandedName(null);
     setError(null);
     setWarning(null);
+    setSummary(null);
     setNewName("");
     void refresh();
   }, [open, refresh]);
@@ -102,15 +104,21 @@ export function DatasetDialog({
     const input = fileInputRef.current;
     const files = [...(input?.files ?? [])];
     if (files.length === 0 || busy) return;
-    const plan = pairDatasetFiles(files);
+    const plan = planDatasetUpload(files);
     setBusy(true);
     try {
-      if (plan.pairs.length > 0) {
-        await uploadDatasetItems(name, plan.pairs);
+      if (plan.items.length > 0) {
+        const updated = await uploadDatasetItems(name, plan.items);
+        const ready = updated.items.filter(
+          (item) => item.image && item.labels,
+        ).length;
+        setSummary(
+          `Uploaded ${plan.items.length} item(s) — ${ready} of ${updated.items.length} complete. Upload the matching files (same name) to finish the rest.`,
+        );
       }
       setWarning(
-        plan.unpaired.length > 0
-          ? `${plan.unpaired.length} file(s) skipped — an image and its label file must share the same name (e.g. DJI_0001.jpg + DJI_0001.jsonl).`
+        plan.unsupported.length > 0
+          ? `${plan.unsupported.length} file(s) skipped — only images and .txt/.jsonl labels are supported, one file per stem.`
           : null,
       );
       if (input) input.value = "";
@@ -213,38 +221,74 @@ export function DatasetDialog({
                         Upload
                       </button>
                     </div>
+                    {summary ? <p className="dataset-summary">{summary}</p> : null}
                     {warning ? <p className="dataset-warning">{warning}</p> : null}
                     {dataset.items.length === 0 ? (
                       <p className="dataset-empty">
-                        No items yet. Select an image plus its .txt/.jsonl
-                        labels, then Upload.
+                        No items yet. Select images, labels, or both, then
+                        Upload — images and labels can be uploaded in separate
+                        passes as long as they share the same name.
                       </p>
                     ) : (
-                      <ul className="dataset-item-list">
-                        {dataset.items.map((item: DatasetItem) => (
-                          <li key={item.stem} data-item-stem={item.stem}>
-                            <span className="dataset-item-stem">{item.stem}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onOpenItem(dataset.name, item);
-                              }}
-                            >
-                              Open
-                            </button>
-                            <button
-                              type="button"
-                              aria-label={`Delete item ${item.stem}`}
-                              disabled={busy}
-                              onClick={() =>
-                                void handleDeleteItem(dataset.name, item.stem)
-                              }
-                            >
-                              Delete
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
+                      <>
+                        <p className="dataset-summary" data-testid={`dataset-ready-${dataset.name}`}>
+                          {
+                            dataset.items.filter(
+                              (item) => item.image && item.labels,
+                            ).length
+                          }{" "}
+                          of {dataset.items.length} item(s) ready to open.
+                        </p>
+                        <ul className="dataset-item-list">
+                          {dataset.items.map((item: DatasetItem) => {
+                            const ready = Boolean(item.image && item.labels);
+                            return (
+                              <li key={item.stem} data-item-stem={item.stem}>
+                                <span className="dataset-item-stem">
+                                  {item.stem}
+                                </span>
+                                <span
+                                  className={
+                                    ready
+                                      ? "dataset-item-state is-ready"
+                                      : "dataset-item-state"
+                                  }
+                                >
+                                  {ready
+                                    ? "image + labels"
+                                    : item.image
+                                      ? "labels pending"
+                                      : "image pending"}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={!ready}
+                                  title={
+                                    ready
+                                      ? undefined
+                                      : "Upload both the image and its label file first"
+                                  }
+                                  onClick={() => {
+                                    onOpenItem(dataset.name, item);
+                                  }}
+                                >
+                                  Open
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Delete item ${item.stem}`}
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void handleDeleteItem(dataset.name, item.stem)
+                                  }
+                                >
+                                  Delete
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </>
                     )}
                   </div>
                 ) : null}
@@ -254,7 +298,7 @@ export function DatasetDialog({
         </ul>
         <div className="dataset-dialog-footer">
           <button type="button" onClick={onClose}>
-            Close
+            Confirm import
           </button>
         </div>
       </div>

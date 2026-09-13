@@ -17,12 +17,20 @@ test("persists a dataset across page reloads", async ({ page }) => {
   const row = dialog.locator('[data-dataset-name="e2e-dataset"]');
   await expect(row).toBeVisible();
   const fileInput = row.getByLabel("Choose dataset files for e2e-dataset");
-  await fileInput.setInputFiles([
-    example("rec-aerial-scene.svg"),
-    example("rec-aerial-scene.txt"),
-  ]);
+
+  // First pass: upload the image alone.
+  await fileInput.setInputFiles([example("rec-aerial-scene.svg")]);
   await row.getByRole("button", { name: "Upload" }).click();
-  await expect(row.getByRole("button", { name: "Open" })).toBeVisible();
+  await expect(row.getByText("labels pending")).toBeVisible();
+  await expect(row.getByRole("button", { name: "Open" })).toBeDisabled();
+  await expect(row.getByText("0 of 1 item(s) ready to open.")).toBeVisible();
+
+  // Second pass: upload the matching labels; the item becomes openable.
+  await fileInput.setInputFiles([example("rec-aerial-scene.txt")]);
+  await row.getByRole("button", { name: "Upload" }).click();
+  await expect(row.getByText("image + labels")).toBeVisible();
+  await expect(row.getByText("1 of 1 item(s) ready to open.")).toBeVisible();
+  await expect(row.getByRole("button", { name: "Open" })).toBeEnabled();
 
   await row.getByRole("button", { name: "Open" }).click();
   await expect(dialog).not.toBeVisible();

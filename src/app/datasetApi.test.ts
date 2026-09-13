@@ -6,7 +6,7 @@ import {
   deleteDataset,
   deleteDatasetItem,
   listDatasets,
-  pairDatasetFiles,
+  planDatasetUpload,
   saveDatasetLabels,
   uploadDatasetItems,
   type DatasetSummary,
@@ -30,36 +30,62 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("pairDatasetFiles", () => {
-  it("pairs images and labels by file stem", () => {
-    const result = pairDatasetFiles([
+describe("planDatasetUpload", () => {
+  it("pairs images and labels by file stem within one batch", () => {
+    const result = planDatasetUpload([
       textFile("a", "DJI_0001_W.jsonl"),
       textFile("b", "DJI_0002_W.txt"),
       textFile("c", "DJI_0001_W.jpg"),
       textFile("d", "DJI_0002_W.PNG"),
     ]);
 
-    expect(result.pairs).toHaveLength(2);
-    expect(result.pairs[0]).toMatchObject({
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toMatchObject({
       stem: "DJI_0001_W",
       image: expect.objectContaining({ name: "DJI_0001_W.jpg" }),
       labels: expect.objectContaining({ name: "DJI_0001_W.jsonl" }),
     });
-    expect(result.pairs[1]?.stem).toBe("DJI_0002_W");
-    expect(result.unpaired).toEqual([]);
+    expect(result.items[1]?.stem).toBe("DJI_0002_W");
+    expect(result.unsupported).toEqual([]);
   });
 
-  it("reports unpaired files instead of dropping them", () => {
-    const result = pairDatasetFiles([
+  it("accepts an images-only batch", () => {
+    const result = planDatasetUpload([
       textFile("a", "scene.jpg"),
-      textFile("b", "orphan.jsonl"),
+      textFile("b", "scene-2.png"),
+    ]);
+
+    expect(result.items.map((item) => item.stem)).toEqual(["scene", "scene-2"]);
+    expect(result.items[0]?.image).toBeDefined();
+    expect(result.items[0]?.labels).toBeUndefined();
+    expect(result.unsupported).toEqual([]);
+  });
+
+  it("accepts a labels-only batch", () => {
+    const result = planDatasetUpload([
+      textFile("a", "scene.jsonl"),
+      textFile("b", "another.txt"),
+    ]);
+
+    expect(result.items.map((item) => item.stem)).toEqual([
+      "scene",
+      "another",
+    ]);
+    expect(result.items[0]?.image).toBeUndefined();
+    expect(result.items[0]?.labels).toBeDefined();
+    expect(result.unsupported).toEqual([]);
+  });
+
+  it("reports unsupported files and duplicate stems in one batch", () => {
+    const result = planDatasetUpload([
+      textFile("a", "scene.jpg"),
+      textFile("b", "scene.jpg"),
       textFile("c", "notes.pdf"),
     ]);
 
-    expect(result.pairs).toEqual([]);
-    expect(result.unpaired.map((file) => file.name)).toEqual([
+    expect(result.items).toHaveLength(1);
+    expect(result.unsupported.map((file) => file.name)).toEqual([
       "scene.jpg",
-      "orphan.jsonl",
       "notes.pdf",
     ]);
   });
@@ -115,6 +141,32 @@ describe("dataset API calls", () => {
       { stem: "a", image: imageFile, labels: labelsFile },
     ]);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("uploads image-only and label-only batches without the other half", async () => {
+    const payloads: { image?: unknown; labels?: unknown }[] = [];
+    const fetchMock = mockFetch(async (url, init) => {
+      expect(url).toBe("/api/datasets/dji/items");
+      const body = JSON.parse(String(init?.body));
+      payloads.push(body.items[0]);
+      return Response.json({ name: "dji", items: [] });
+    });
+
+    await uploadDatasetItems("dji", [
+      {
+        stem: "a",
+        image: new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
+      },
+    ]);
+    await uploadDatasetItems("dji", [
+      { stem: "a", labels: textFile("labels", "a.jsonl") },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(payloads[0]?.image).toBeDefined();
+    expect(payloads[0]?.labels).toBeUndefined();
+    expect(payloads[1]?.image).toBeUndefined();
+    expect(payloads[1]?.labels).toBeDefined();
   });
 
   it("saves label text back to the dataset", async () => {

@@ -128,6 +128,60 @@ describe("dataset middleware", () => {
     expect(await labelsResponse.text()).toContain('"expression": "x"');
   });
 
+  it("merges separately uploaded images and labels into one item", async () => {
+    await createDataset("dji");
+
+    const imagesOnly = await fetch(`${baseUrl}/api/datasets/dji/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ image: { name: "a.jpg", data: imageBase64 } }],
+      }),
+    });
+    expect(imagesOnly.status).toBe(200);
+    expect(((await imagesOnly.json()) as { items: unknown[] }).items).toEqual([
+      { stem: "a", image: "a.jpg", labels: null },
+    ]);
+
+    const labelsOnly = await fetch(`${baseUrl}/api/datasets/dji/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [
+          {
+            labels: {
+              name: "a.jsonl",
+              text: '{"expression": "later", "targets": [[1, 2, 3, 4]]}',
+            },
+          },
+        ],
+      }),
+    });
+    expect(labelsOnly.status).toBe(200);
+    expect(((await labelsOnly.json()) as { items: unknown[] }).items).toEqual([
+      { stem: "a", image: "a.jpg", labels: "a.jsonl" },
+    ]);
+    expect(
+      fs.readFileSync(path.join(rootDir, "dji", "labels", "a.jsonl"), "utf8"),
+    ).toContain('"later"');
+    expect(
+      fs.readFileSync(path.join(rootDir, "dji", "images", "a.jpg"), "utf8"),
+    ).toBe("fake-jpeg-bytes");
+
+    const served = await fetch(`${baseUrl}/datasets/dji/images/a.jpg`);
+    expect(served.status).toBe(200);
+  });
+
+  it("rejects an item that carries neither half", async () => {
+    await createDataset("dji");
+    const response = await fetch(`${baseUrl}/api/datasets/dji/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: [{ stem: "a" }] }),
+    });
+    expect(response.status).toBe(400);
+  });
+
   it("lists datasets with their manifests", async () => {
     await createDataset("dji");
     await uploadItem("dji");

@@ -3717,6 +3717,78 @@ it("uploads image and label pairs into a dataset", async () => {
   expect(mockedApi.listDatasets).toHaveBeenCalledTimes(3);
 });
 
+it("accepts images and labels in separate upload passes", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  const imageOnly = {
+    name: "dji",
+    items: [{ stem: "a", image: "a.jpg", labels: null }],
+  };
+  const complete = {
+    name: "dji",
+    items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }],
+  };
+  mockedApi.listDatasets
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([imageOnly])
+    .mockResolvedValueOnce([imageOnly])
+    .mockResolvedValue([complete]);
+  mockedApi.uploadDatasetItems
+    .mockResolvedValueOnce(imageOnly)
+    .mockResolvedValueOnce(complete);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.type(within(dialog).getByLabelText("Dataset name"), "dji");
+  await user.click(within(dialog).getByRole("button", { name: "Create dataset" }));
+
+  // First pass: images only.
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+
+  await waitFor(() =>
+    expect(datasetApi.uploadDatasetItems).toHaveBeenNthCalledWith(1, "dji", [
+      {
+        stem: "a",
+        image: expect.objectContaining({ name: "a.jpg" }),
+      },
+    ]),
+  );
+  await waitFor(() =>
+    expect(within(dialog).getByText("labels pending")).toBeVisible(),
+  );
+  expect(within(dialog).getByRole("button", { name: "Open" })).toBeDisabled();
+  expect(dialog).toHaveTextContent("0 of 1 item(s) ready to open.");
+
+  // Second pass: matching labels only.
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    textFile('{"expression": "x", "targets": [[0, 0, 5, 5]]}', "a.jsonl"),
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+
+  await waitFor(() =>
+    expect(datasetApi.uploadDatasetItems).toHaveBeenNthCalledWith(2, "dji", [
+      {
+        stem: "a",
+        labels: expect.objectContaining({ name: "a.jsonl" }),
+      },
+    ]),
+  );
+  await waitFor(() =>
+    expect(within(dialog).getByRole("button", { name: "Open" })).toBeEnabled(),
+  );
+  expect(dialog).toHaveTextContent("1 of 1 item(s) ready to open.");
+  expect(dialog).toHaveTextContent("image + labels");
+  await expect(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  ).toBeVisible();
+});
+
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();

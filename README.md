@@ -87,12 +87,17 @@ backend):
 
 - **Create dataset** — a group is a folder with `images/`, `labels/`, and a
   `dataset.json` manifest.
-- **Choose files → Upload** — pick any mix of images and `.txt`/`.jsonl`
-  labels; files are paired automatically by basename (`DJI_0001.jpg` +
-  `DJI_0001.jsonl`). Unpaired files are skipped and reported.
+- **Choose files → Upload** — upload in as many passes as you like: a batch of
+  images first, then the matching `.txt`/`.jsonl` labels (or vice versa). Files
+  are merged by basename (`DJI_0001.jpg` + `DJI_0001.jsonl`). Files with other
+  extensions, or a duplicate stem inside one batch, are skipped and reported.
+- Each item shows its state — `image + labels`, `labels pending`, or
+  `image pending` — and **Open** is enabled once both halves exist. The
+  dialog header reports how many items are ready.
 - **Open** — loads the image and its labels straight from disk, so nothing has
   to be re-uploaded next session. Edits are stored back into the dataset with
   **Save**.
+- **Confirm import** closes the dialog; items, files, and edits stay on disk.
 - Delete items or whole datasets from the same dialog.
 
 ## REC JSONL format

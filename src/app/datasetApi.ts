@@ -3,9 +3,9 @@ import { isJsonlLabelFile } from "../domain/jsonl";
 export interface DatasetItem {
   /** Basename without extension; pairs one image with one label file. */
   stem: string;
-  /** File name inside the dataset's images/ folder. */
-  image: string;
-  /** File name inside the dataset's labels/ folder, when present. */
+  /** File name inside the dataset's images/ folder, once uploaded. */
+  image: string | null;
+  /** File name inside the dataset's labels/ folder, once uploaded. */
   labels: string | null;
 }
 
@@ -14,61 +14,65 @@ export interface DatasetSummary {
   items: DatasetItem[];
 }
 
-export interface DatasetUploadPair {
+/**
+ * One item of an upload batch. Batches may carry only images, only labels, or
+ * both; the server merges them by stem so users can upload in several passes.
+ */
+export interface DatasetUploadItem {
   stem: string;
   image?: File;
   labels?: File;
 }
 
 export interface DatasetUploadPlan {
-  pairs: DatasetUploadPair[];
-  unpaired: File[];
+  items: DatasetUploadItem[];
+  unsupported: File[];
 }
 
 const IMAGE_FILE_PATTERN =
   /\.(?:apng|avif|bmp|gif|heic|heif|ico|jfif|jpe?g|png|svg|tiff?|webp)$/i;
 const LABEL_FILE_PATTERN = /\.(?:txt|jsonl)$/i;
 
-/** Groups a batch of files into image+label pairs by basename. */
-export function pairDatasetFiles(files: readonly File[]): DatasetUploadPlan {
+/**
+ * Groups one upload batch by file stem. Images and labels may arrive in
+ * separate batches — the caller uploads whatever it gets and the server merges
+ * halves that share a stem.
+ */
+export function planDatasetUpload(files: readonly File[]): DatasetUploadPlan {
   const stemOf = (name: string) => name.replace(/\.[^./\\]+$/, "");
   const keyOf = (stem: string) => stem.toLocaleLowerCase();
 
-  const images = new Map<string, File>();
-  const labels = new Map<string, File>();
-  const order: string[] = [];
+  const items = new Map<string, DatasetUploadItem>();
+  const unsupported: File[] = [];
 
   for (const file of files) {
     const stem = stemOf(file.name);
     const key = keyOf(stem);
+
     if (IMAGE_FILE_PATTERN.test(file.name)) {
-      if (!images.has(key)) {
-        images.set(key, file);
-        if (!order.includes(key)) order.push(key);
+      const item = items.get(key) ?? { stem };
+      if (item.image) {
+        unsupported.push(file);
+        continue;
       }
+      item.image = file;
+      items.set(key, item);
       continue;
     }
     if (LABEL_FILE_PATTERN.test(file.name)) {
-      if (!labels.has(key)) {
-        labels.set(key, file);
-        if (!order.includes(key)) order.push(key);
+      const item = items.get(key) ?? { stem };
+      if (item.labels) {
+        unsupported.push(file);
+        continue;
       }
+      item.labels = file;
+      items.set(key, item);
+      continue;
     }
+    unsupported.push(file);
   }
 
-  const pairs: DatasetUploadPair[] = [];
-  const consumed = new Set<File>();
-  for (const key of order) {
-    const image = images.get(key);
-    const labelsFile = labels.get(key);
-    if (!image || !labelsFile) continue;
-    pairs.push({ stem: stemOf(image.name), image, labels: labelsFile });
-    consumed.add(image);
-    consumed.add(labelsFile);
-  }
-
-  const unpaired = files.filter((file) => !consumed.has(file));
-  return { pairs, unpaired };
+  return { items: [...items.values()], unsupported };
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -149,30 +153,42 @@ export async function deleteDatasetItem(
 }
 
 export interface DatasetUploadPayload {
-  image: { name: string; data: string };
-  labels: { name: string; text: string };
+  stem: string;
+  image?: { name: string; data: string };
+  labels?: { name: string; text: string };
 }
 
 export async function uploadDatasetItems(
   name: string,
-  pairs: readonly DatasetUploadPair[],
+  items: readonly DatasetUploadItem[],
 ): Promise<DatasetSummary> {
-  const items: DatasetUploadPayload[] = [];
-  for (const pair of pairs) {
-    if (!pair.image || !pair.labels) continue;
-    items.push({
-      image: {
-        name: pair.image.name,
-        data: bytesToBase64(await fileBytes(pair.image)),
-      },
-      labels: { name: pair.labels.name, text: await fileText(pair.labels) },
+  const payload: DatasetUploadPayload[] = [];
+  for (const item of items) {
+    payload.push({
+      stem: item.stem,
+      ...(item.image
+        ? {
+            image: {
+              name: item.image.name,
+              data: bytesToBase64(await fileBytes(item.image)),
+            },
+          }
+        : {}),
+      ...(item.labels
+        ? {
+            labels: {
+              name: item.labels.name,
+              text: await fileText(item.labels),
+            },
+          }
+        : {}),
     });
   }
 
   return request<DatasetSummary>(`/api/datasets/${encodeURIComponent(name)}/items`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items: payload }),
   });
 }
 
