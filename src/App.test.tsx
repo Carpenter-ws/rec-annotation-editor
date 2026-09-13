@@ -15,6 +15,20 @@ import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { parseAnnotationText } from "./domain/parser";
 import * as editorReducerModule from "./state/editorReducer";
 import { makeStressAnnotations } from "../tests/fixtures/makeStressAnnotations";
+import * as datasetApi from "./app/datasetApi";
+
+vi.mock("./app/datasetApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./app/datasetApi")>();
+  return {
+    ...actual,
+    listDatasets: vi.fn(),
+    createDataset: vi.fn(),
+    deleteDataset: vi.fn(),
+    deleteDatasetItem: vi.fn(),
+    uploadDatasetItems: vi.fn(),
+    saveDatasetLabels: vi.fn(),
+  };
+});
 
 const exampleFixture = (name: string) =>
   path.resolve(process.cwd(), "public/examples", name);
@@ -364,6 +378,68 @@ it("rejects an empty trimmed expression in the new-annotation dialog", async () 
     "Expression cannot be empty.",
   );
   expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+});
+
+it("imports, edits, saves, and exports JSONL label files", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 1000, height: 800 }]);
+  mockViewportEnvironment();
+  const { blobs, click } = mockDownloadEnvironment();
+  render(<App />);
+
+  const jsonl = [
+    '{"expression": "the red-and-white boats", "level": "L1", "targets": [[10, 20, 110, 120], [200, 210, 300, 310]]}',
+    '{"expression": "the white boats", "level": "L2", "targets": [[500, 500, 600, 600]]}',
+  ].join("\n");
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "aerial.jpg", { type: "image/jpeg" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(jsonl, "aerial.jsonl"),
+  );
+
+  expect(await screen.findByText("3 annotations")).toBeVisible();
+  const panel = screen.getByRole("complementary", { name: "Annotations" });
+  expect(
+    panel.querySelectorAll<HTMLElement>(
+      '.annotation-group-card[data-group-label="the red-and-white boats"]',
+    ),
+  ).toHaveLength(2);
+
+  const expression = within(
+    panel.querySelector('[data-annotation-id="ann_001"]')!,
+  ).getByRole("textbox", { name: "Expression" });
+  await user.click(expression);
+  await user.clear(expression);
+  await user.type(expression, "the orange boats");
+  fireEvent.blur(expression);
+
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    "aerial-edited.jsonl",
+  );
+  // blobs[0] is the decoded image blob; the save download follows.
+  const savedLines = (await readBlob(blobs[1]!)).trim().split("\n");
+  expect(JSON.parse(savedLines[0]!)).toEqual({
+    expression: "the orange boats",
+    targets: [[10, 20, 110, 120]],
+  });
+  expect(JSON.parse(savedLines[1]!)).toEqual({
+    expression: "the red-and-white boats",
+    targets: [[200, 210, 300, 310]],
+  });
+  expect(JSON.parse(savedLines[2]!).expression).toBe("the white boats");
+
+  await user.click(screen.getByRole("button", { name: "Export" }));
+  await user.click(screen.getByRole("menuitem", { name: "Export JSONL" }));
+  await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+  expect((click.mock.contexts[1] as HTMLAnchorElement).download).toBe(
+    "aerial.jsonl",
+  );
+  expect(blobs[2]?.type).toBe("application/x-ndjson");
 });
 
 it("adds and selects a trimmed original-coordinate annotation without moving the view", async () => {
@@ -3531,6 +3607,114 @@ it("disables category add buttons until an image provides bounds", async () => {
   expect(
     screen.getByRole("button", { name: "Add bicycle box" }),
   ).toBeDisabled();
+});
+
+it("opens a dataset item, edits it, and saves it back to the dataset", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [{ stem: "DJI_0001", image: "DJI_0001.jpg", labels: "DJI_0001.jsonl" }],
+    },
+  ]);
+  mockedApi.saveDatasetLabels.mockResolvedValue(undefined);
+  mockImageEnvironment([{ width: 1000, height: 800 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response('{"expression": "person", "targets": [[10, 20, 110, 120]]}', {
+        status: 200,
+      }),
+    ),
+  );
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+  await user.click(
+    within(dialog).getByRole("button", {
+      name: /Open/i,
+    }),
+  );
+
+  expect(await screen.findByTestId("bbox-ann_001")).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
+    "x",
+    "10",
+  );
+
+  // Edits save back into the dataset through the API.
+  const expression = screen.getByRole("textbox", { name: "Expression" });
+  await user.click(expression);
+  await user.type(expression, " edited");
+  fireEvent.blur(expression);
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+  await waitFor(() =>
+    expect(datasetApi.saveDatasetLabels).toHaveBeenCalledWith(
+      "dji",
+      "DJI_0001.jsonl",
+      expect.stringContaining("person edited"),
+    ),
+  );
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+  expect(screen.getByTestId("editor-notice")).toHaveTextContent(
+    /dataset "dji"/,
+  );
+});
+
+it("uploads image and label pairs into a dataset", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets
+    .mockResolvedValueOnce([])
+    .mockResolvedValue([
+      {
+        name: "dji",
+        items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }],
+      },
+    ]);
+  mockedApi.uploadDatasetItems.mockResolvedValue({
+    name: "dji",
+    items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }],
+  });
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.type(
+    within(dialog).getByLabelText("Dataset name"),
+    "dji",
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Create dataset" }));
+
+  // The freshly created dataset expands itself.
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    [
+      new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
+      textFile('{"expression": "x", "targets": [[0, 0, 5, 5]]}', "a.jsonl"),
+    ],
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+
+  await waitFor(() =>
+    expect(datasetApi.uploadDatasetItems).toHaveBeenCalledWith("dji", [
+      {
+        stem: "a",
+        image: expect.objectContaining({ name: "a.jpg" }),
+        labels: expect.objectContaining({ name: "a.jsonl" }),
+      },
+    ]),
+  );
+  expect(mockedApi.listDatasets).toHaveBeenCalledTimes(3);
 });
 
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {

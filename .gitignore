@@ -7,4 +7,5 @@ coverage/
 playwright-report/
 test-results/
 .playwright-browsers/
+datasets/
 *.local

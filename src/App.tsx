@@ -11,6 +11,7 @@ import {
   downloadText,
   isFileSystemAccessBlockedError,
   loadImageFile,
+  loadImageFromUrl,
   partitionDroppedFiles,
   pickTextFile,
   readTextFile,
@@ -19,11 +20,18 @@ import {
 } from "./app/fileIO";
 import { useMediaQuery } from "./app/useMediaQuery";
 import {
+  datasetImageUrl,
+  datasetLabelsUrl,
+  saveDatasetLabels,
+  type DatasetItem,
+} from "./app/datasetApi";
+import {
   isEditableTarget,
   useKeyboardShortcuts,
 } from "./app/useKeyboardShortcuts";
 import { useUnsavedWarning } from "./app/useUnsavedWarning";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
+import { DatasetDialog } from "./components/DatasetDialog";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
 import { AnnotationPanel } from "./components/AnnotationPanel";
 import { NewAnnotationDialog } from "./components/NewAnnotationDialog";
@@ -31,6 +39,11 @@ import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
 import { clampBBox } from "./domain/bbox";
+import {
+  isJsonlLabelFile,
+  parseJsonlAnnotations,
+  serializeAnnotationsJsonl,
+} from "./domain/jsonl";
 import { parseAnnotationText } from "./domain/parser";
 import {
   serializeAnnotationsTxt,
@@ -127,13 +140,17 @@ function fileStem(fileName: string): string {
 
 function editedTxtName(labelFileName: string | null, imageName: string | null) {
   const stem = fileStem(labelFileName ?? imageName ?? "annotations");
-  return `${stem}-edited.txt`;
+  const extension =
+    labelFileName && /\.(?:txt|jsonl)$/i.test(labelFileName)
+      ? (labelFileName.match(/\.[^.]+$/)?.[0] ?? ".txt")
+      : ".txt";
+  return `${stem}-edited${extension}`;
 }
 
 function exportFileName(
   labelFileName: string | null,
   imageName: string | null,
-  extension: "txt" | "json",
+  extension: "txt" | "json" | "jsonl",
 ) {
   return `${fileStem(labelFileName ?? imageName ?? "annotations")}.${extension}`;
 }
@@ -155,6 +172,11 @@ function EditorWorkspace(): JSX.Element {
   const [draftLabel, setDraftLabel] = useState<string | null>(null);
   const draftLabelRef = useRef(draftLabel);
   draftLabelRef.current = draftLabel;
+  const [datasetDialogOpen, setDatasetDialogOpen] = useState(false);
+  const datasetContextRef = useRef<{
+    dataset: string;
+    labelsFile: string;
+  } | null>(null);
   const [toast, setToast] = useState<{ key: number; message: string } | null>(
     null,
   );
@@ -256,6 +278,86 @@ function EditorWorkspace(): JSX.Element {
     }
     viewportRef.current?.fit();
   }, [dispatch]);
+  const openDatasetItem = useCallback(
+    async (datasetName: string, item: DatasetItem) => {
+      if (!item.labels) {
+        setErrorReport({
+          title: "Could not open dataset item",
+          issues: [`"${item.stem}" has no label file.`],
+        });
+        return;
+      }
+      const generation = ++importGenerationRef.current;
+      const isCurrent = () =>
+        mountedRef.current && importGenerationRef.current === generation;
+      try {
+        const activeElement = document.activeElement;
+        if (
+          isEditableTarget(activeElement) &&
+          activeElement instanceof HTMLElement &&
+          activeElement.closest("[data-annotation-id]")
+        ) {
+          activeElement.blur();
+        }
+        setDraftBBox(null);
+        setHighlightedLabel(null);
+        setActiveLabel(null);
+        setDraftLabel(null);
+        dispatch({ type: "SET_MODE", mode: "select" });
+        setErrorReport(null);
+        setNotice(null);
+
+        const labelsResponse = await fetch(
+          datasetLabelsUrl(datasetName, item.labels),
+        );
+        if (!labelsResponse.ok) {
+          throw new Error(
+            `Could not load labels for "${item.stem}" (${labelsResponse.status}).`,
+          );
+        }
+        const text = await labelsResponse.text();
+        if (!isCurrent()) return;
+
+        const parsed = isJsonlLabelFile(item.labels)
+          ? parseJsonlAnnotations(text)
+          : parseAnnotationText(text);
+        if (parsed.issues.length > 0) {
+          setErrorReport({
+            title: "Could not open dataset item",
+            issues: [...parsed.issues],
+          });
+          return;
+        }
+
+        const image = await loadImageFromUrl(
+          datasetImageUrl(datasetName, item.image),
+          item.image,
+        );
+        if (!isCurrent()) return;
+
+        datasetContextRef.current = {
+          dataset: datasetName,
+          labelsFile: item.labels,
+        };
+        dispatch({
+          type: "COMMIT_IMPORT",
+          image,
+          annotationBaseline: {
+            annotations: parsed.annotations,
+            fileName: item.labels,
+          },
+        });
+        setDatasetDialogOpen(false);
+      } catch (error) {
+        if (!isCurrent()) return;
+        setErrorReport({
+          title: "Could not open dataset item",
+          issues: [errorMessage(error)],
+        });
+      }
+    },
+    [dispatch],
+  );
   const handleCoordinateDraftChange = useCallback(
     (id: string, pending: boolean) => {
       setPendingCoordinateIds((current) => {
@@ -340,7 +442,9 @@ function EditorWorkspace(): JSX.Element {
 
       if (!isCurrent()) return;
 
-      const parsed = parseAnnotationText(text);
+      const parsed = isJsonlLabelFile(files.labels.name)
+        ? parseJsonlAnnotations(text)
+        : parseAnnotationText(text);
       if (parsed.issues.length > 0) {
         setErrorReport({
           title: "Could not import labels",
@@ -401,7 +505,10 @@ function EditorWorkspace(): JSX.Element {
       return;
     }
 
-    if (files.labels) labelHandleRef.current = labelHandle;
+    if (files.labels) {
+      labelHandleRef.current = labelHandle;
+      datasetContextRef.current = null;
+    }
 
     if (loadedImage) {
       const previousUrl = acceptedImageUrlRef.current;
@@ -498,9 +605,24 @@ function EditorWorkspace(): JSX.Element {
       latestState.labelFileName,
       latestState.image?.name ?? null,
     );
+    const saveJsonl = isJsonlLabelFile(fileName);
     try {
-      const contents = serializeAnnotationsTxt(snapshot);
-      if (labelHandleRef.current) {
+      const contents = saveJsonl
+        ? serializeAnnotationsJsonl(snapshot)
+        : serializeAnnotationsTxt(snapshot);
+      if (datasetContextRef.current) {
+        const { dataset, labelsFile } = datasetContextRef.current;
+        try {
+          await saveDatasetLabels(dataset, labelsFile, contents);
+          setNotice(`Saved "${labelsFile}" to dataset "${dataset}".`);
+        } catch (error) {
+          setErrorReport({
+            title: "Could not save annotations",
+            issues: [errorMessage(error)],
+          });
+          return;
+        }
+      } else if (labelHandleRef.current) {
         try {
           await writeTextToHandle(labelHandleRef.current, contents);
           setNotice(
@@ -508,13 +630,21 @@ function EditorWorkspace(): JSX.Element {
           );
         } catch (error) {
           if (!isFileSystemAccessBlockedError(error)) throw error;
-          downloadText(contents, fileName, "text/plain");
+          downloadText(
+            contents,
+            fileName,
+            saveJsonl ? "application/x-ndjson" : "text/plain",
+          );
           setNotice(
             `Downloaded "${fileName}". Direct file access is blocked in this context.`,
           );
         }
       } else {
-        downloadText(contents, fileName, "text/plain");
+        downloadText(
+          contents,
+          fileName,
+          saveJsonl ? "application/x-ndjson" : "text/plain",
+        );
         setNotice(
           `Downloaded "${fileName}". This browser cannot write back to the imported file.`,
         );
@@ -534,11 +664,16 @@ function EditorWorkspace(): JSX.Element {
   const saveAs = async () => {
     const latestState = stateRef.current;
     const snapshot = latestState.annotations;
+    const saveJsonl = isJsonlLabelFile(
+      editedTxtName(latestState.labelFileName, latestState.image?.name ?? null),
+    );
     try {
       const result = await saveTextAs(
-        serializeAnnotationsTxt(snapshot),
+        saveJsonl
+          ? serializeAnnotationsJsonl(snapshot)
+          : serializeAnnotationsTxt(snapshot),
         editedTxtName(latestState.labelFileName, latestState.image?.name ?? null),
-        "text/plain",
+        saveJsonl ? "application/x-ndjson" : "text/plain",
       );
       if (
         result !== "cancelled" &&
@@ -555,13 +690,15 @@ function EditorWorkspace(): JSX.Element {
     }
   };
 
-  const exportAnnotations = (format: "txt" | "json") => {
+  const exportAnnotations = (format: "txt" | "json" | "jsonl") => {
     const latestState = stateRef.current;
     try {
       const contents =
         format === "txt"
           ? serializeAnnotationsTxt(latestState.annotations)
-          : serializeDocumentJson(latestState);
+          : format === "jsonl"
+            ? serializeAnnotationsJsonl(latestState.annotations)
+            : serializeDocumentJson(latestState);
       downloadText(
         contents,
         exportFileName(
@@ -569,7 +706,11 @@ function EditorWorkspace(): JSX.Element {
           latestState.image?.name ?? null,
           format,
         ),
-        format === "txt" ? "text/plain" : "application/json",
+        format === "txt"
+          ? "text/plain"
+          : format === "jsonl"
+            ? "application/x-ndjson"
+            : "application/json",
       );
     } catch (error) {
       setErrorReport({
@@ -625,6 +766,7 @@ function EditorWorkspace(): JSX.Element {
         onOpenImage={(file) => void importFiles({ image: file })}
         onOpenLabels={(file) => void importFiles({ labels: file })}
         onPickLabels={() => void pickLabels()}
+        onOpenDatasets={() => setDatasetDialogOpen(true)}
         onSave={() => void save()}
         onSaveAs={() => void saveAs()}
         undoDisabled={
@@ -641,6 +783,7 @@ function EditorWorkspace(): JSX.Element {
         }
         onExportTxt={() => exportAnnotations("txt")}
         onExportJson={() => exportAnnotations("json")}
+        onExportJsonl={() => exportAnnotations("jsonl")}
         onZoomOut={() => viewportRef.current?.zoomBy(1 / 1.2)}
         onZoomIn={() => viewportRef.current?.zoomBy(1.2)}
         onFit={() => viewportRef.current?.fit()}
@@ -761,10 +904,17 @@ function EditorWorkspace(): JSX.Element {
         issues={errorReport?.issues ?? []}
         onClose={() => setErrorReport(null)}
       />
+      <DatasetDialog
+        open={datasetDialogOpen}
+        onClose={() => setDatasetDialogOpen(false)}
+        onOpenItem={(datasetName, item) =>
+          void openDatasetItem(datasetName, item)
+        }
+      />
       <input
         ref={fallbackLabelInputRef}
         type="file"
-        accept=".txt,text/plain"
+        accept=".txt,.jsonl,text/plain"
         aria-label="Fallback label file"
         hidden
         onChange={(event) => {

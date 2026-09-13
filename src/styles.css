@@ -611,6 +611,185 @@ input,
 
 /* Dialogs */
 
+.dataset-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgb(9 13 18 / 62%);
+}
+
+.dataset-dialog-panel {
+  width: min(640px, 100%);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  overflow-y: auto;
+  padding: var(--space-lg);
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.dataset-dialog-panel h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dataset-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dataset-create {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-end;
+}
+
+.dataset-create label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dataset-create input {
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.dataset-create button,
+.dataset-actions button,
+.dataset-dialog-footer button,
+.dataset-row button,
+.dataset-item-list button {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.dataset-create button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dataset-create button:hover:not(:disabled),
+.dataset-actions button:hover:not(:disabled),
+.dataset-item-list button:hover:not(:disabled) {
+  background: #fff;
+}
+
+.dataset-list {
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.dataset-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 8px;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.dataset-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataset-count {
+  min-width: 22px;
+  padding: 1px 6px;
+  font-size: 11px;
+  text-align: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.dataset-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg);
+}
+
+.dataset-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.dataset-warning,
+.dataset-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warning);
+}
+
+.dataset-empty {
+  color: var(--text-muted);
+}
+
+.dataset-item-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.dataset-item-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 4px 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.dataset-item-stem {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataset-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .error-dialog-backdrop,
 .new-annotation-dialog {
   position: fixed;

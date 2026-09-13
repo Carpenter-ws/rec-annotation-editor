@@ -30,7 +30,7 @@ function isImageFile(file: File): boolean {
 }
 
 function isLabelFile(file: File): boolean {
-  return /\.txt$/i.test(file.name);
+  return /\.(?:txt|jsonl)$/i.test(file.name);
 }
 
 export function downloadText(
@@ -191,4 +191,34 @@ export async function loadImageFile(file: File): Promise<ImageInfo> {
     URL.revokeObjectURL(url);
     throw error;
   }
+}
+
+/** Loads image dimensions from a persistent URL (e.g. a dataset asset). */
+export async function loadImageFromUrl(
+  url: string,
+  name: string,
+): Promise<ImageInfo> {
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () =>
+      reject(new Error(`Could not decode image "${name}".`));
+    image.src = url;
+  });
+
+  if (
+    !Number.isFinite(image.naturalWidth) ||
+    !Number.isFinite(image.naturalHeight) ||
+    image.naturalWidth <= 0 ||
+    image.naturalHeight <= 0
+  ) {
+    throw new Error(`Could not decode image "${name}".`);
+  }
+
+  return {
+    name,
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+    url,
+  };
 }

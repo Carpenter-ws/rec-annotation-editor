@@ -169,7 +169,7 @@ test("edits a complete REC document without coordinate drift", async ({
 
   await page.getByRole("button", { name: "Export" }).click();
   const txtDownloadPromise = page.waitForEvent("download");
-  await page.getByRole("menuitem", { name: "Export TXT" }).click();
+  await page.getByRole("menuitem", { name: "Export TXT", exact: true }).click();
   const txtPath = await (await txtDownloadPromise).path();
   expect(await readFile(txtPath!, "utf8")).toMatch(
     /the person nearest the blue car 0\n/,
@@ -177,7 +177,7 @@ test("edits a complete REC document without coordinate drift", async ({
 
   await page.getByRole("button", { name: "Export" }).click();
   const jsonDownloadPromise = page.waitForEvent("download");
-  await page.getByRole("menuitem", { name: "Export JSON" }).click();
+  await page.getByRole("menuitem", { name: "Export JSON", exact: true }).click();
   const jsonPath = await (await jsonDownloadPromise).path();
   const json = JSON.parse(await readFile(jsonPath!, "utf8"));
   expect(json).toMatchObject({

@@ -8,6 +8,7 @@ export interface ToolbarProps {
   onOpenImage: (file: File) => void;
   onOpenLabels: (file: File) => void;
   onPickLabels: () => void;
+  onOpenDatasets: () => void;
   onSave: () => void;
   onSaveAs: () => void;
   undoDisabled: boolean;
@@ -16,6 +17,7 @@ export interface ToolbarProps {
   onRedo: () => void;
   onExportTxt: () => void;
   onExportJson: () => void;
+  onExportJsonl: () => void;
   onZoomOut: () => void;
   onZoomIn: () => void;
   onFit: () => void;
@@ -36,6 +38,7 @@ export function Toolbar({
   onOpenImage,
   onOpenLabels,
   onPickLabels,
+  onOpenDatasets,
   onSave,
   onSaveAs,
   undoDisabled,
@@ -44,6 +47,7 @@ export function Toolbar({
   onRedo,
   onExportTxt,
   onExportJson,
+  onExportJsonl,
   onZoomOut,
   onZoomIn,
   onFit,
@@ -98,11 +102,14 @@ export function Toolbar({
         <input
           ref={labelInputRef}
           type="file"
-          accept=".txt,text/plain"
+          accept=".txt,.jsonl,text/plain"
           aria-label="Open labels"
           hidden
           onChange={(event) => forwardFile(event, onOpenLabels)}
         />
+        <button type="button" onClick={onOpenDatasets}>
+          Datasets
+        </button>
       </div>
       <div className="toolbar-file-names" aria-label="Open files">
         <span>{imageName ?? "No image"}</span>
@@ -153,6 +160,16 @@ export function Toolbar({
               }}
             >
               Export JSON
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setExportOpen(false);
+                onExportJsonl();
+              }}
+            >
+              Export JSONL
             </button>
           </div>
         ) : null}

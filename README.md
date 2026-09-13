@@ -79,6 +79,37 @@ resizing only change the view; they never rewrite box data.
 | `Shift` + mouse wheel | Pan the image left/right |
 | `Shift` + left-drag, or middle-drag | Pan the canvas |
 
+## Datasets (batch upload and persistent groups)
+
+Click **Datasets** in the toolbar to manage reusable annotation groups that
+live in the project's `datasets/` folder (served by the dev server, no external
+backend):
+
+- **Create dataset** — a group is a folder with `images/`, `labels/`, and a
+  `dataset.json` manifest.
+- **Choose files → Upload** — pick any mix of images and `.txt`/`.jsonl`
+  labels; files are paired automatically by basename (`DJI_0001.jpg` +
+  `DJI_0001.jsonl`). Unpaired files are skipped and reported.
+- **Open** — loads the image and its labels straight from disk, so nothing has
+  to be re-uploaded next session. Edits are stored back into the dataset with
+  **Save**.
+- Delete items or whole datasets from the same dialog.
+
+## REC JSONL format
+
+The JSONL format (one REC document per line) is fully supported for import,
+editing, save, and export:
+
+```jsonl
+{"expression": "the red-and-white boats", "level": "L1", "targets": [[3, 46, 117, 62], [317, 482, 368, 550]]}
+{"expression": "the white boats", "level": "L2", "targets": [[636, 790, 665, 837]]}
+```
+
+Every target becomes one box sharing the expression; boxes that share a label
+are regrouped into one `targets` line on export. The auxiliary `level` field is
+not preserved by the editor (per-box metadata is out of scope) — keep a backup
+of the original file if `level` matters.
+
 ## Label formats
 
 TXT lines contain four coordinates, the referring expression, and a trailing
@@ -94,8 +125,8 @@ everything between the fourth number and that field as the expression, so
 multi-word expressions and expressions that contain digits work. One inherent
 ambiguity remains: a line like `0 0 10 10 0` is a box labelled `0`, while
 `0 0 10 10 0 0` is a box labelled `0` with the reserved field. When an
-expression itself ends in a standalone `0`, prefer **JSON** to avoid losing
-information:
+expression itself ends in a standalone `0`, prefer **JSONL** or **JSON** to
+avoid losing information:
 
 ```json
 {
