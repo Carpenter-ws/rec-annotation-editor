@@ -133,7 +133,7 @@ input,
   text-align: center;
 }
 
-.dataset-nav output {
+.dataset-nav .dataset-position {
   min-width: 48px;
   font-size: 12px;
   color: #a9b6c4;

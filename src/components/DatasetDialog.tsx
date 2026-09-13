@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from "react";
 import {
   createDataset,
   deleteDataset,
@@ -10,13 +17,22 @@ import {
 } from "../app/datasetApi";
 import {
   createStagedFile,
+  groupStagedItems,
   markDuplicateStems,
   readStagedDatasetFile,
   revokeStagedFiles,
-  stagedFilesSummary,
   stagedFilesToUploadItems,
+  stagedItemsSummary,
   type StagedDatasetFile,
+  type StagedItem,
 } from "../app/datasetStaging";
+
+/** Wording for the pairing state of one staged item. */
+const ITEM_STATE_LABEL: Record<StagedItem["state"], string> = {
+  complete: "image + labels",
+  "missing-labels": "missing labels",
+  "missing-image": "missing image",
+};
 
 export interface DatasetDialogProps {
   open: boolean;
@@ -72,15 +88,16 @@ export function DatasetDialog({
     replaceStaged([]);
   }, [replaceStaged]);
 
-  const refresh = useCallback(async (): Promise<boolean> => {
+  const refresh = useCallback(async (): Promise<DatasetSummary[] | null> => {
     setLoading(true);
     try {
-      setDatasets(await listDatasets());
+      const loaded = await listDatasets();
+      setDatasets(loaded);
       setError(null);
-      return true;
+      return loaded;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load datasets.");
-      return false;
+      return null;
     } finally {
       setLoading(false);
     }
@@ -95,6 +112,16 @@ export function DatasetDialog({
     clearStaged();
     void refresh();
   }, [open, refresh, clearStaged]);
+
+  // One row per item: staged halves are paired with what the dataset already
+  // stores, so a lone image only reads as "missing labels" when nothing is
+  // stored for it yet.
+  const expandedItems =
+    datasets.find((dataset) => dataset.name === expandedName)?.items ?? [];
+  const stagedItems = useMemo(
+    () => groupStagedItems(staged, expandedItems),
+    [staged, expandedItems],
+  );
 
   if (!open) return null;
 
@@ -134,11 +161,19 @@ export function DatasetDialog({
     }
   };
 
-  const removeStaged = (id: string) => {
-    const target = stagedRef.current.find((file) => file.id === id);
-    if (target) revokeStagedFiles([target]);
+  /** Drops every staged half of one item. */
+  const removeStagedItem = (stem: string) => {
+    const key = stem.toLocaleLowerCase();
+    const removed = stagedRef.current.filter(
+      (file) => file.stem.toLocaleLowerCase() === key,
+    );
+    revokeStagedFiles(removed);
     replaceStaged(
-      markDuplicateStems(stagedRef.current.filter((file) => file.id !== id)),
+      markDuplicateStems(
+        stagedRef.current.filter(
+          (file) => file.stem.toLocaleLowerCase() !== key,
+        ),
+      ),
     );
   };
 
@@ -190,20 +225,27 @@ export function DatasetDialog({
 
   /** Confirm import is the single point where the batch reaches the backend. */
   const handleConfirmImport = async () => {
+    const datasetName = expandedName;
     const items = stagedFilesToUploadItems(stagedRef.current);
-    if (!expandedName || busy || items.length === 0) return;
+    if (!datasetName || busy || items.length === 0) return;
     setBusy(true);
     setError(null);
     try {
-      const updated = await uploadDatasetItems(expandedName, items);
-      const ready = updated.items.filter(
-        (item) => item.image && item.labels,
-      ).length;
-      setSummary(
-        `Imported ${items.length} item(s) — ${ready} of ${updated.items.length} complete. Upload the matching files (same name) to finish the rest.`,
-      );
+      await uploadDatasetItems(datasetName, items);
       clearStaged();
-      await refresh();
+      const loaded = await refresh();
+
+      // The canvas re-enters the dataset as soon as an image is available.
+      const updated = loaded?.find((entry) => entry.name === datasetName);
+      const importedStems = items.map((entry) => entry.stem.toLocaleLowerCase());
+      const next = updated?.items.find(
+        (entry) =>
+          entry.image !== null &&
+          importedStems.includes(entry.stem.toLocaleLowerCase()),
+      );
+      if (updated && next) {
+        onOpenItem(datasetName, next, updated.items);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not import files.");
     } finally {
@@ -211,11 +253,11 @@ export function DatasetDialog({
     }
   };
 
-  const stagedSummary = stagedFilesSummary(staged);
+  const stagedSummary = stagedItemsSummary(stagedItems);
   const canConfirm =
-    staged.length > 0 &&
+    stagedItems.length > 0 &&
     !busy &&
-    staged.every((file) => file.status === "ready");
+    stagedItems.every((item) => item.status === "ready");
 
   return (
     <div className="dataset-dialog-backdrop">
@@ -319,54 +361,76 @@ export function DatasetDialog({
                         Choose files
                       </button>
                     </div>
-                    {staged.length > 0 ? (
+                    {stagedItems.length > 0 ? (
                       <ul className="dataset-staged" aria-label="Staged files">
-                        {staged.map((file) => (
-                          <li
-                            key={file.id}
-                            data-staged-name={file.name}
-                            data-staged-status={file.status}
-                          >
-                            {file.previewUrl ? (
-                              <img
-                                className="staged-thumb"
-                                src={file.previewUrl}
-                                alt=""
-                              />
-                            ) : (
-                              <span className="staged-kind" aria-hidden="true">
-                                {file.kind === "image"
-                                  ? "IMG"
-                                  : file.kind === "labels"
-                                    ? "LBL"
-                                    : "?"}
-                              </span>
-                            )}
-                            <span className="staged-name">{file.name}</span>
-                            {file.status === "reading" ? (
-                              <span
-                                className="staged-spinner"
-                                role="progressbar"
-                                aria-label={`Loading ${file.name}`}
-                              />
-                            ) : file.status === "error" ? (
-                              <span className="staged-detail is-error">
-                                {file.error}
-                              </span>
-                            ) : (
-                              <span className="staged-detail">
-                                {file.detail}
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              aria-label={`Remove ${file.name}`}
-                              onClick={() => removeStaged(file.id)}
+                        {stagedItems.map((item) => {
+                          const details: string[] = [];
+                          if (item.image) {
+                            if (item.image.detail)
+                              details.push(item.image.detail);
+                          } else if (item.imageOnServer) {
+                            details.push("image already stored");
+                          }
+                          if (item.labels) {
+                            if (item.labels.detail)
+                              details.push(item.labels.detail);
+                          } else if (item.labelsOnServer) {
+                            details.push("labels already stored");
+                          }
+
+                          return (
+                            <li
+                              key={item.stem}
+                              data-staged-stem={item.stem}
+                              data-staged-status={item.status}
+                              data-staged-state={item.state}
                             >
-                              ×
-                            </button>
-                          </li>
-                        ))}
+                              {item.image?.previewUrl ? (
+                                <img
+                                  className="staged-thumb"
+                                  src={item.image.previewUrl}
+                                  alt=""
+                                />
+                              ) : (
+                                <span
+                                  className="staged-kind"
+                                  aria-hidden="true"
+                                >
+                                  {item.hasImage ? "IMG" : "LBL"}
+                                </span>
+                              )}
+                              <span className="staged-name">{item.stem}</span>
+                              {item.status === "reading" ? (
+                                <span
+                                  className="staged-spinner"
+                                  role="progressbar"
+                                  aria-label={`Loading ${item.stem}`}
+                                />
+                              ) : item.status === "error" ? (
+                                <span className="staged-detail is-error">
+                                  {item.issues.join(" · ")}
+                                </span>
+                              ) : (
+                                <span className="staged-detail">
+                                  {details.join(" · ")}
+                                </span>
+                              )}
+                              <span
+                                className={`staged-state is-${item.state}`}
+                                data-testid={`staged-state-${item.stem}`}
+                              >
+                                {ITEM_STATE_LABEL[item.state]}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={`Remove ${item.stem}`}
+                                onClick={() => removeStagedItem(item.stem)}
+                              >
+                                ×
+                              </button>
+                            </li>
+                          );
+                        })}
                       </ul>
                     ) : null}
                     {stagedSummary ? (
@@ -388,15 +452,17 @@ export function DatasetDialog({
                           data-testid={`dataset-ready-${dataset.name}`}
                         >
                           {
-                            dataset.items.filter(
-                              (item) => item.image && item.labels,
-                            ).length
+                            dataset.items.filter((item) => item.image).length
                           }{" "}
-                          of {dataset.items.length} item(s) ready to open.
+                          of {dataset.items.length} item(s) ready to open (an
+                          image is enough; labels are created on save).
                         </p>
                         <ul className="dataset-item-list">
                           {dataset.items.map((item: DatasetItem) => {
-                            const ready = Boolean(item.image && item.labels);
+                            // An image alone can be opened and annotated; the
+                            // labels file is created on the first save.
+                            const ready = Boolean(item.image);
+                            const hasLabels = Boolean(item.labels);
                             return (
                               <li key={item.stem} data-item-stem={item.stem}>
                                 <span className="dataset-item-stem">
@@ -404,12 +470,12 @@ export function DatasetDialog({
                                 </span>
                                 <span
                                   className={
-                                    ready
+                                    hasLabels
                                       ? "dataset-item-state is-ready"
                                       : "dataset-item-state"
                                   }
                                 >
-                                  {ready
+                                  {hasLabels
                                     ? "image + labels"
                                     : item.image
                                       ? "labels pending"
@@ -421,7 +487,7 @@ export function DatasetDialog({
                                   title={
                                     ready
                                       ? undefined
-                                      : "Add both the image and its label file first"
+                                      : "Add the image first — labels are optional"
                                   }
                                   onClick={() => {
                                     onOpenItem(dataset.name, item, dataset.items);

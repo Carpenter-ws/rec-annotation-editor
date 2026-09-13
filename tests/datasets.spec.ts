@@ -30,19 +30,25 @@ test("switches between images of one dataset", async ({ page }) => {
       buffer: Buffer.from(secondLabels),
     },
   ]);
+  // One row per item, each pairing its image with its label file.
+  const stagedRows = row.locator(".dataset-staged li");
+  await expect(stagedRows).toHaveCount(2);
+  await expect(
+    row.locator('[data-staged-stem="nav-one"]'),
+  ).toHaveAttribute("data-staged-state", "complete");
   await expect(row.getByTestId("staged-summary")).toContainText(
-    "4 files ready to import",
+    "2 items to import",
   );
   await dialog.getByRole("button", { name: "Confirm import" }).click();
-  await expect(row.getByText("2 of 2 item(s) ready to open.")).toBeVisible();
 
-  // Open the second item and step back with the toolbar buttons.
-  await row
-    .locator('[data-item-stem="nav-two"]')
-    .getByRole("button", { name: "Open" })
-    .click();
+  // The canvas re-enters the dataset on the first imported image.
   const position = page.getByTestId("dataset-position");
   const firstCard = page.locator('[data-annotation-id="ann_001"]');
+  await expect(position).toHaveText("1 / 2");
+  await expect(firstCard.getByLabel("Expression")).toHaveValue("person");
+
+  // Step to the second item, then back with the toolbar buttons.
+  await page.getByRole("button", { name: "Next image" }).click();
   await expect(position).toHaveText("2 / 2");
   await expect(page.getByRole("button", { name: "Next image" })).toBeDisabled();
   await expect(firstCard.getByLabel("Expression")).toHaveValue("vehicle");
@@ -91,29 +97,38 @@ test("persists a dataset across page reloads", async ({ page }) => {
   await expect(row).toBeVisible();
   const fileInput = row.getByLabel("Choose dataset files for e2e-dataset");
 
-  // First pass: add the image alone; it is staged locally, then imported.
+  // First pass: the image alone. It is staged, then shown on the canvas even
+  // without a label file.
   await fileInput.setInputFiles([example("rec-aerial-scene.svg")]);
+  await expect(row.getByTestId("staged-state-rec-aerial-scene")).toHaveText(
+    "missing labels",
+  );
   await expect(row.getByTestId("staged-summary")).toContainText(
-    "1 file ready to import",
+    "1 item to import",
   );
   await dialog.getByRole("button", { name: "Confirm import" }).click();
-  await expect(row.getByText("labels pending")).toBeVisible();
-  await expect(row.getByRole("button", { name: "Open" })).toBeDisabled();
-  await expect(row.getByText("0 of 1 item(s) ready to open.")).toBeVisible();
-
-  // Second pass: add the matching labels; the item becomes openable.
-  await fileInput.setInputFiles([example("rec-aerial-scene.txt")]);
-  await expect(row.getByTestId("staged-summary")).toContainText(
-    "1 file ready to import",
-  );
-  await dialog.getByRole("button", { name: "Confirm import" }).click();
-  await expect(row.getByText("image + labels")).toBeVisible();
-  await expect(row.getByText("1 of 1 item(s) ready to open.")).toBeVisible();
-  await expect(row.getByRole("button", { name: "Open" })).toBeEnabled();
-
-  await row.getByRole("button", { name: "Open" }).click();
   await expect(dialog).not.toBeVisible();
   const cards = page.locator("[data-annotation-id]");
+  await expect(page.getByText("1920 × 1080", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("0 annotations");
+
+  // Second pass: add the matching labels to the same item.
+  await page.getByRole("button", { name: "Datasets" }).click();
+  const reopened = page.getByRole("dialog", { name: "Datasets" });
+  const reopenedRow = reopened.locator('[data-dataset-name="e2e-dataset"]');
+  await reopenedRow
+    .getByRole("button", { name: "Toggle e2e-dataset items" })
+    .click();
+  await expect(reopenedRow.getByText("labels pending")).toBeVisible();
+  await expect(reopenedRow.getByText(/1 of 1 item\(s\) ready to open/)).toBeVisible();
+  await reopenedRow
+    .getByLabel("Choose dataset files for e2e-dataset")
+    .setInputFiles([example("rec-aerial-scene.txt")]);
+  await expect(
+    reopenedRow.getByTestId("staged-state-rec-aerial-scene"),
+  ).toHaveText("image + labels");
+  await reopened.getByRole("button", { name: "Confirm import" }).click();
+  await expect(reopened).not.toBeVisible();
   await expect(cards).toHaveCount(24);
   await expect(page.getByText("1920 × 1080", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Save status")).toContainText("Saved");

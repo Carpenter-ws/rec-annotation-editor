@@ -183,25 +183,119 @@ export function stagedFilesToUploadItems(
   return [...items.values()];
 }
 
-/** One-line status for the staged batch, e.g. "2 files ready to import". */
-export function stagedFilesSummary(
+/** The half that is still missing for an item. */
+export type StagedItemState = "complete" | "missing-labels" | "missing-image";
+
+/** One dataset item as shown in the dialog: at most one image and one label file. */
+export interface StagedItem {
+  stem: string;
+  /** Staged image, when the user picked one in this batch. */
+  image: StagedDatasetFile | null;
+  /** Staged label file, when the user picked one in this batch. */
+  labels: StagedDatasetFile | null;
+  /** The dataset already stores an image for this item. */
+  imageOnServer: boolean;
+  /** The dataset already stores a label file for this item. */
+  labelsOnServer: boolean;
+  hasImage: boolean;
+  hasLabels: boolean;
+  state: StagedItemState;
+  /** Hard failures: unsupported, duplicate, unreadable, or unparsable. */
+  issues: string[];
+  status: "reading" | "ready" | "error";
+}
+
+/**
+ * Collapses the staged files into one row per item and pairs them with the
+ * halves the dataset already stores, so an image alone reads as
+ * "missing labels" only when nothing is stored for it yet.
+ */
+export function groupStagedItems(
   files: readonly StagedDatasetFile[],
+  storedItems: readonly {
+    stem: string;
+    image: string | null;
+    labels: string | null;
+  }[],
+): StagedItem[] {
+  interface Group {
+    image: StagedDatasetFile | null;
+    labels: StagedDatasetFile | null;
+    /** Every file of this item, in the order the user picked them. */
+    files: StagedDatasetFile[];
+  }
+
+  const order: string[] = [];
+  const groups = new Map<string, Group>();
+  for (const file of files) {
+    const key = file.stem.toLocaleLowerCase();
+    let group = groups.get(key);
+    if (!group) {
+      group = { image: null, labels: null, files: [] };
+      groups.set(key, group);
+      order.push(key);
+    }
+    group.files.push(file);
+    if (file.kind === "image" && !group.image) group.image = file;
+    else if (file.kind === "labels" && !group.labels) group.labels = file;
+  }
+
+  const storedByStem = new Map(
+    storedItems.map((item) => [item.stem.toLocaleLowerCase(), item]),
+  );
+
+  return order.map((key) => {
+    const group = groups.get(key)!;
+    const stored = storedByStem.get(key);
+    const imageOnServer = Boolean(stored?.image);
+    const labelsOnServer = Boolean(stored?.labels);
+    const hasImage = group.image !== null || imageOnServer;
+    const hasLabels = group.labels !== null || labelsOnServer;
+
+    const issues = group.files
+      .filter((file) => file.status === "error")
+      .map((file) => `${file.name}: ${file.error}`);
+
+    const reading = [group.image, group.labels].some(
+      (file) => file?.status === "reading",
+    );
+
+    return {
+      stem: group.image?.stem ?? group.labels?.stem ?? stored?.stem ?? key,
+      image: group.image,
+      labels: group.labels,
+      imageOnServer,
+      labelsOnServer,
+      hasImage,
+      hasLabels,
+      state: hasImage
+        ? hasLabels
+          ? "complete"
+          : "missing-labels"
+        : "missing-image",
+      issues,
+      status: issues.length > 0 ? "error" : reading ? "reading" : "ready",
+    };
+  });
+}
+
+/** One-line status for the staged batch, e.g. "2 items to import". */
+export function stagedItemsSummary(
+  items: readonly StagedItem[],
 ): string | null {
-  if (files.length === 0) return null;
-  const reading = files.filter((file) => file.status === "reading").length;
-  const ready = files.filter((file) => file.status === "ready").length;
-  const failed = files.filter((file) => file.status === "error").length;
+  if (items.length === 0) return null;
+  const reading = items.filter((item) => item.status === "reading").length;
+  const failed = items.filter((item) => item.status === "error").length;
+  const importable = items.length - failed;
 
   const parts: string[] = [];
   if (reading > 0) parts.push("Reading files…");
-  if (ready > 0) {
-    parts.push(
-      reading > 0 || failed > 0
-        ? `${ready} ready`
-        : `${ready} ${ready === 1 ? "file" : "files"} ready to import`,
-    );
+  if (importable > 0) {
+    parts.push(`${importable} ${importable === 1 ? "item" : "items"} to import`);
   }
-  if (failed > 0) parts.push(`${failed} ${failed === 1 ? "needs" : "need"} attention`);
+  if (failed > 0) {
+    parts.push(`${failed} ${failed === 1 ? "needs" : "need"} attention`);
+  }
   return parts.join(" · ");
 }
 

@@ -211,6 +211,43 @@ describe("dataset middleware", () => {
     ).toContain('"edited"');
   });
 
+  it("creates the label file of an image-only item on first save", async () => {
+    await createDataset("dji");
+    const imagesOnly = await fetch(`${baseUrl}/api/datasets/dji/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ image: { name: "a.jpg", data: imageBase64 } }],
+      }),
+    });
+    expect(imagesOnly.status).toBe(200);
+
+    const created = await fetch(`${baseUrl}/api/datasets/dji/labels/a.txt`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain" },
+      body: "10 20 110 120 person 0\n",
+    });
+    expect(created.status).toBe(204);
+    expect(
+      fs.readFileSync(path.join(rootDir, "dji", "labels", "a.txt"), "utf8"),
+    ).toBe("10 20 110 120 person 0\n");
+
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(rootDir, "dji", "dataset.json"), "utf8"),
+    ) as { items: { stem: string; image: string | null; labels: string | null }[] };
+    expect(manifest.items).toEqual([
+      { stem: "a", image: "a.jpg", labels: "a.txt" },
+    ]);
+
+    // A label file that matches no item is still rejected.
+    const orphan = await fetch(`${baseUrl}/api/datasets/dji/labels/b.txt`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain" },
+      body: "x",
+    });
+    expect(orphan.status).toBe(404);
+  });
+
   it("deletes items and whole datasets", async () => {
     await createDataset("dji");
     await uploadItem("dji");

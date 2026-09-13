@@ -133,13 +133,13 @@ export function Toolbar({
           >
             ‹ Previous
           </button>
-          <output
-            role="presentation"
+          <span
+            className="dataset-position"
             data-testid="dataset-position"
             aria-label="Dataset position"
           >
             {datasetNavigation.position} / {datasetNavigation.total}
-          </output>
+          </span>
           <button
             type="button"
             aria-label="Next image"

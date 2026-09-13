@@ -3968,12 +3968,17 @@ it("stages chosen files locally and imports them on Confirm import", async () =>
     ],
   );
 
-  await waitFor(() =>
-    expect(within(dialog).getByText("400 × 300")).toBeVisible(),
+  const stagedRow = await waitFor(() => {
+    const row = dialog.querySelector<HTMLElement>('[data-staged-stem="a"]');
+    expect(row).not.toBeNull();
+    return row!;
+  });
+  expect(stagedRow).toHaveTextContent("400 × 300 · 1 box");
+  expect(within(dialog).getByTestId("staged-state-a")).toHaveTextContent(
+    "image + labels",
   );
-  expect(within(dialog).getByText("1 box")).toBeVisible();
   expect(within(dialog).getByTestId("staged-summary")).toHaveTextContent(
-    "2 files ready to import",
+    "1 item to import",
   );
   expect(datasetApi.uploadDatasetItems).not.toHaveBeenCalled();
 
@@ -4013,7 +4018,7 @@ it("shows a per-file loading state until a staged file is ready", async () => {
   );
 
   expect(
-    within(dialog).getByRole("progressbar", { name: "Loading a.jsonl" }),
+    within(dialog).getByRole("progressbar", { name: "Loading a" }),
   ).toBeVisible();
   expect(
     within(dialog).getByRole("button", { name: "Confirm import" }),
@@ -4021,7 +4026,13 @@ it("shows a per-file loading state until a staged file is ready", async () => {
 
   labels.resolve('{"expression": "x", "targets": [[0, 0, 5, 5]]}');
 
-  await waitFor(() => expect(within(dialog).getByText("1 box")).toBeVisible());
+  await waitFor(() =>
+    expect(within(dialog).getByTestId("staged-state-a")).toHaveTextContent(
+      "missing image",
+    ),
+  );
+  expect(within(dialog).getByText("1 box")).toBeVisible();
+  // A missing half does not block the import.
   expect(
     within(dialog).getByRole("button", { name: "Confirm import" }),
   ).toBeEnabled();
@@ -4049,16 +4060,17 @@ it("blocks the import until a failed file is removed", async () => {
     dataTransfer: { files: [textFile("done", "notes.pdf")] },
   });
 
-  await waitFor(() =>
-    expect(
-      within(dialog).getByText("Line 1: invalid bounding box"),
-    ).toBeVisible(),
-  );
+  const row = await waitFor(() => {
+    const element = dialog.querySelector<HTMLElement>('[data-staged-stem="a"]');
+    expect(element).toHaveAttribute("data-staged-status", "error");
+    return element!;
+  });
+  expect(row).toHaveTextContent("a.txt: Line 1: invalid bounding box");
   expect(
-    within(dialog).getByText(
-      "Unsupported file type — use an image or a .txt/.jsonl label file.",
-    ),
-  ).toBeVisible();
+    dialog.querySelector<HTMLElement>('[data-staged-stem="notes"]'),
+  ).toHaveTextContent(
+    "notes.pdf: Unsupported file type — use an image or a .txt/.jsonl label file.",
+  );
   expect(within(dialog).getByTestId("staged-summary")).toHaveTextContent(
     "2 need attention",
   );
@@ -4066,9 +4078,9 @@ it("blocks the import until a failed file is removed", async () => {
     within(dialog).getByRole("button", { name: "Confirm import" }),
   ).toBeDisabled();
 
-  await user.click(within(dialog).getByRole("button", { name: "Remove a.txt" }));
+  await user.click(within(dialog).getByRole("button", { name: "Remove a" }));
   await user.click(
-    within(dialog).getByRole("button", { name: "Remove notes.pdf" }),
+    within(dialog).getByRole("button", { name: "Remove notes" }),
   );
 
   expect(within(dialog).queryByLabelText("Staged files")).not.toBeInTheDocument();
@@ -4109,26 +4121,120 @@ it("discards staged files and their previews when cancelled", async () => {
   );
 });
 
-it("accepts images and labels in separate import passes", async () => {
+it("pairs a staged image with labels the dataset already stores", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);
   mockImageEnvironment([{ width: 400, height: 300 }]);
-  const imageOnly = {
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [{ stem: "a", image: null, labels: "a.jsonl" }],
+    },
+  ]);
+  mockedApi.uploadDatasetItems.mockResolvedValue({
     name: "dji",
-    items: [{ stem: "a", image: "a.jpg", labels: null }],
-  };
-  const complete = {
+    items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }],
+  });
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
+  );
+
+  // The stored label file answers the "missing labels" question.
+  await waitFor(() =>
+    expect(within(dialog).getByTestId("staged-state-a")).toHaveTextContent(
+      "image + labels",
+    ),
+  );
+  const row = dialog.querySelector<HTMLElement>('[data-staged-stem="a"]')!;
+  expect(row).toHaveTextContent("400 × 300 · labels already stored");
+
+  await user.click(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  );
+
+  await waitFor(() =>
+    expect(datasetApi.uploadDatasetItems).toHaveBeenCalledWith("dji", [
+      { stem: "a", image: expect.objectContaining({ name: "a.jpg" }) },
+    ]),
+  );
+});
+
+it("opens an image-only dataset item as an empty canvas and saves new labels", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  mockedApi.listDatasets.mockResolvedValue([
+    { name: "dji", items: [{ stem: "a", image: "a.jpg", labels: null }] },
+  ]);
+  mockedApi.saveDatasetLabels.mockResolvedValue(undefined);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+  expect(dialog).toHaveTextContent("1 of 1 item(s) ready to open");
+  await user.click(within(dialog).getByRole("button", { name: "Open" }));
+
+  // The canvas shows the image with no boxes and no error.
+  expect(await screen.findByText("400 × 300")).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+  expect(screen.queryByRole("dialog", { name: /error/i })).not.toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(screen.getByTestId("editor-notice")).toHaveTextContent(
+    'No label file yet for "a"',
+  );
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.txt");
+
+  // The first save creates the label file next to the image.
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() =>
+    expect(datasetApi.saveDatasetLabels).toHaveBeenCalledWith("dji", "a.txt", ""),
+  );
+});
+
+it("re-enters the imported item on the canvas after Confirm import", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          '{"expression": "person", "targets": [[100, 100, 500, 500]]}',
+          { status: 200 },
+        ),
+    ),
+  );
+  const summary = {
     name: "dji",
     items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }],
   };
   mockedApi.listDatasets
     .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([imageOnly])
-    .mockResolvedValueOnce([imageOnly])
-    .mockResolvedValue([complete]);
-  mockedApi.uploadDatasetItems
-    .mockResolvedValueOnce(imageOnly)
-    .mockResolvedValueOnce(complete);
+    .mockResolvedValueOnce([{ name: "dji", items: [] }])
+    // The refreshed list is what the dialog reads back after the import.
+    .mockResolvedValue([summary]);
+  mockedApi.uploadDatasetItems.mockResolvedValue(summary);
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
@@ -4136,13 +4242,90 @@ it("accepts images and labels in separate import passes", async () => {
   await user.type(within(dialog).getByLabelText("Dataset name"), "dji");
   await user.click(within(dialog).getByRole("button", { name: "Create dataset" }));
 
-  // First pass: images only.
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    [
+      new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
+      textFile("10 20 110 120 person 0", "a.txt"),
+    ],
+  );
+  await waitFor(() =>
+    expect(within(dialog).getByTestId("staged-state-a")).toHaveTextContent(
+      "image + labels",
+    ),
+  );
+  await user.click(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  );
+
+  expect(
+    await screen.findByDisplayValue("person"),
+  ).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
+  expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
+});
+
+it("accepts images and labels in separate import passes", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          '{"expression": "person", "targets": [[100, 100, 500, 500]]}',
+          { status: 200 },
+        ),
+    ),
+  );
+  // A stateful stand-in for the server: halves only appear once uploaded.
+  let uploadedImage = false;
+  let uploadedLabels = false;
+  const serverState = () => [
+    {
+      name: "dji",
+      items:
+        uploadedImage || uploadedLabels
+          ? [
+              {
+                stem: "a",
+                image: uploadedImage ? "a.jpg" : null,
+                labels: uploadedLabels ? "a.jsonl" : null,
+              },
+            ]
+          : [],
+    },
+  ];
+  mockedApi.listDatasets.mockImplementation(async () => serverState());
+  mockedApi.uploadDatasetItems.mockImplementation(async (_name, items) => {
+    if (items.some((entry) => entry.image)) uploadedImage = true;
+    if (items.some((entry) => entry.labels)) uploadedLabels = true;
+    return serverState()[0]!;
+  });
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.type(within(dialog).getByLabelText("Dataset name"), "dji");
+  await user.click(within(dialog).getByRole("button", { name: "Create dataset" }));
+
+  // First pass: an image alone; it is imported and shown on the canvas.
   await user.upload(
     within(dialog).getByLabelText("Choose dataset files for dji"),
     new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
   );
   await waitFor(() =>
-    expect(within(dialog).getByText("400 × 300")).toBeVisible(),
+    expect(within(dialog).getByTestId("staged-state-a")).toHaveTextContent(
+      "missing labels",
+    ),
   );
   await user.click(
     within(dialog).getByRole("button", { name: "Confirm import" }),
@@ -4157,19 +4340,29 @@ it("accepts images and labels in separate import passes", async () => {
     ]),
   );
   await waitFor(() =>
-    expect(within(dialog).getByText("labels pending")).toBeVisible(),
+    expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument(),
   );
-  expect(within(dialog).getByRole("button", { name: "Open" })).toBeDisabled();
-  expect(dialog).toHaveTextContent("0 of 1 item(s) ready to open.");
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
 
-  // Second pass: matching labels only.
+  // Second pass: the matching labels only, added to the same item.
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const reopened = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(reopened).getByRole("button", { name: "Toggle dji items" }),
+  );
+  expect(reopened).toHaveTextContent("labels pending");
+  expect(reopened).toHaveTextContent("1 of 1 item(s) ready to open");
   await user.upload(
-    within(dialog).getByLabelText("Choose dataset files for dji"),
+    within(reopened).getByLabelText("Choose dataset files for dji"),
     textFile('{"expression": "x", "targets": [[0, 0, 5, 5]]}', "a.jsonl"),
   );
-  await waitFor(() => expect(within(dialog).getByText("1 box")).toBeVisible());
+  await waitFor(() =>
+    expect(within(reopened).getByTestId("staged-state-a")).toHaveTextContent(
+      "image + labels",
+    ),
+  );
   await user.click(
-    within(dialog).getByRole("button", { name: "Confirm import" }),
+    within(reopened).getByRole("button", { name: "Confirm import" }),
   );
 
   await waitFor(() =>
@@ -4181,10 +4374,10 @@ it("accepts images and labels in separate import passes", async () => {
     ]),
   );
   await waitFor(() =>
-    expect(within(dialog).getByRole("button", { name: "Open" })).toBeEnabled(),
+    expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument(),
   );
-  expect(dialog).toHaveTextContent("1 of 1 item(s) ready to open.");
-  expect(dialog).toHaveTextContent("image + labels");
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
 });
 
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {

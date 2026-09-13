@@ -359,16 +359,30 @@ export function createDatasetMiddleware(rootDir: string) {
           sendError(res, 400, "unsupported label type");
           return;
         }
-        if (!manifest.items.some((entry) => entry.labels === resourceKey)) {
+        // An item that only has an image gets its label file on first save, so
+        // freshly imported images can be annotated right away.
+        const existingForFile = manifest.items.find(
+          (entry) => entry.labels === resourceKey,
+        );
+        const waitingForLabels =
+          existingForFile ??
+          manifest.items.find(
+            (entry) => entry.stem === stemOf(resourceKey) && !entry.labels,
+          );
+        if (!waitingForLabels) {
           sendError(res, 404, "label file not found in dataset");
           return;
         }
         const filePath = resolveWithin(datasetDir, "labels", resourceKey);
-        if (filePath === null || !fs.existsSync(filePath)) {
-          sendError(res, 404, "label file not found");
+        if (filePath === null) {
+          sendError(res, 400, "invalid label file name");
           return;
         }
         fs.writeFileSync(filePath, await readBody(req), "utf8");
+        if (waitingForLabels.labels !== resourceKey) {
+          waitingForLabels.labels = resourceKey;
+          writeManifest(datasetDir, manifest);
+        }
         res.writeHead(204);
         res.end();
         return;

@@ -88,22 +88,31 @@ backend):
 
 - **Create dataset** — a group is a folder with `images/`, `labels/`, and a
   `dataset.json` manifest.
-- **Drop or choose files — they load immediately** — as soon as files are
-  picked (file dialog or drag and drop) they are read in the browser and each
-  one gets a row with its own progress: a spinner while loading, then a
-  thumbnail plus `3840 × 2160` for images, `12 boxes` for label files, or an
-  explicit error. Nothing is sent to the server yet.
+- **Drop or choose files — one row per item, read immediately** — files are
+  read in the browser as soon as they are picked (file dialog or drag and
+  drop): a spinner while loading, then the image thumbnail plus its size and
+  the label file's box count, or an explicit error. Images and their labels
+  collapse into a **single row per item** (`DJI_0001`), never one row per file.
+- **The stored halves are searched first** — if the dataset already holds the
+  label file for a chosen image (or the image for a chosen label file), the row
+  pairs them up and reads `image + labels`. Only a genuinely missing half shows
+  `missing labels` or `missing image`; a missing half does not block the import,
+  it just means that item arrives incomplete.
 - **Confirm import** is the only step that reaches the backend: the staged
   batch is uploaded in one request and merged by basename
   (`DJI_0001.jpg` + `DJI_0001.jsonl`). **Cancel** (or `Close` when nothing is
   staged) throws the staged files away without touching the server.
-- Batches may be split: images first, matching labels later (or vice versa).
-  Unsupported extensions, duplicate stems, unreadable images, and label files
-  with parse errors are flagged in their row — **Confirm import** stays
-  disabled until every remaining row is ready, and a `×` removes a row.
+- Unsupported extensions, duplicate stems, unreadable images, and label files
+  with parse errors are flagged in the item's row — **Confirm import** stays
+  disabled until the offending row is removed with its `×`.
+- **After importing, the canvas re-enters the dataset**: the dialog closes and
+  the first imported item that has an image is loaded, labels or not. An item
+  whose labels are missing opens as an empty document — the image is shown with
+  no boxes and **Save** creates `<stem>.txt` (or `.jsonl` when the dataset uses
+  that) next to the image.
 - Each item shows its state — `image + labels`, `labels pending`, or
-  `image pending` — and **Open** is enabled once both halves exist. The
-  dialog header reports how many items are ready.
+  `image pending` — and **Open** is enabled as soon as an image exists; the
+  header reports how many items are ready to open.
 - **Open** — loads the image and its labels straight from disk, so nothing has
   to be re-uploaded next session. Edits are stored back into the dataset with
   **Save**.

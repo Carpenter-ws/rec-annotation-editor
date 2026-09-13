@@ -155,6 +155,13 @@ function fileStem(fileName: string): string {
   return fileName.replace(/\.[^./\\]+$/, "");
 }
 
+/** A new label file follows the convention the dataset already uses. */
+function preferredLabelExtension(items: readonly DatasetItem[]): string {
+  return items.some((item) => item.labels?.toLowerCase().endsWith(".jsonl"))
+    ? ".jsonl"
+    : ".txt";
+}
+
 function editedTxtName(labelFileName: string | null, imageName: string | null) {
   const stem = fileStem(labelFileName ?? imageName ?? "annotations");
   const extension =
@@ -307,11 +314,11 @@ function EditorWorkspace(): JSX.Element {
     ) => {
       const labelsFile = item.labels;
       const imageFile = item.image;
-      if (!labelsFile || !imageFile) {
+      if (!imageFile) {
         setErrorReport({
           title: "Could not open dataset item",
           issues: [
-            `"${item.stem}" needs both an image and a label file. Upload the missing half first.`,
+            `"${item.stem}" has no image yet, so there is nothing to annotate. Add its image first.`,
           ],
         });
         return;
@@ -336,26 +343,30 @@ function EditorWorkspace(): JSX.Element {
         setErrorReport(null);
         setNotice(null);
 
-        const labelsResponse = await fetch(
-          datasetLabelsUrl(datasetName, labelsFile),
-        );
-        if (!labelsResponse.ok) {
-          throw new Error(
-            `Could not load labels for "${item.stem}" (${labelsResponse.status}).`,
+        let annotations: Annotation[] = [];
+        if (labelsFile) {
+          const labelsResponse = await fetch(
+            datasetLabelsUrl(datasetName, labelsFile),
           );
-        }
-        const text = await labelsResponse.text();
-        if (!isCurrent()) return;
+          if (!labelsResponse.ok) {
+            throw new Error(
+              `Could not load labels for "${item.stem}" (${labelsResponse.status}).`,
+            );
+          }
+          const text = await labelsResponse.text();
+          if (!isCurrent()) return;
 
-        const parsed = isJsonlLabelFile(labelsFile)
-          ? parseJsonlAnnotations(text)
-          : parseAnnotationText(text);
-        if (parsed.issues.length > 0) {
-          setErrorReport({
-            title: "Could not open dataset item",
-            issues: [...parsed.issues],
-          });
-          return;
+          const parsed = isJsonlLabelFile(labelsFile)
+            ? parseJsonlAnnotations(text)
+            : parseAnnotationText(text);
+          if (parsed.issues.length > 0) {
+            setErrorReport({
+              title: "Could not open dataset item",
+              issues: [...parsed.issues],
+            });
+            return;
+          }
+          annotations = parsed.annotations;
         }
 
         const image = await loadImageFromUrl(
@@ -365,18 +376,23 @@ function EditorWorkspace(): JSX.Element {
         if (!isCurrent()) return;
 
         // Dataset JSONL files store normalized [0, 1000] targets.
-        const annotations = isJsonlLabelFile(labelsFile)
-          ? scaleAnnotationsToPixels(parsed.annotations, {
-              width: image.width,
-              height: image.height,
-            })
-          : parsed.annotations;
+        const scaled =
+          labelsFile && isJsonlLabelFile(labelsFile)
+            ? scaleAnnotationsToPixels(annotations, {
+                width: image.width,
+                height: image.height,
+              })
+            : annotations;
         normalizedSourceRef.current = false;
 
+        // Without labels the item opens as an empty document; saving creates
+        // the matching label file next to the image.
+        const labelFileName =
+          labelsFile ?? `${item.stem}${preferredLabelExtension(siblings)}`;
         const view: DatasetView = {
           dataset: datasetName,
           stem: item.stem,
-          labelsFile,
+          labelsFile: labelFileName,
           items: siblings.length > 0 ? siblings : [item],
         };
         datasetViewRef.current = view;
@@ -385,10 +401,15 @@ function EditorWorkspace(): JSX.Element {
           type: "COMMIT_IMPORT",
           image,
           annotationBaseline: {
-            annotations,
-            fileName: labelsFile,
+            annotations: scaled,
+            fileName: labelFileName,
           },
         });
+        if (!labelsFile) {
+          setNotice(
+            `No label file yet for "${item.stem}" — draw boxes and Save to create one.`,
+          );
+        }
         setDatasetDialogOpen(false);
       } catch (error) {
         if (!isCurrent()) return;
