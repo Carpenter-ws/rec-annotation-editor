@@ -20,7 +20,17 @@ test("edits a complete REC document without coordinate drift", async ({
   await expect(cards).toHaveCount(24);
   await expect(page.getByText("1920 × 1080", { exact: true })).toBeVisible();
 
-  // Selecting directly on the canvas must work and reveal the resize handles.
+  // The canvas starts clean: boxes only appear for a picked expression.
+  await expect(page.getByTestId("bbox-ann_009")).toHaveCount(0);
+
+  // Picking a category draws its boxes; clicking one on the canvas selects it
+  // and reveals the resize handles.
+  await page
+    .getByRole("button", {
+      name: "the large building in the upper left",
+      exact: true,
+    })
+    .click();
   await page.getByTestId("bbox-ann_009").click();
   await expect(page.getByTestId("bbox-ann_009")).toHaveAttribute(
     "data-selected",

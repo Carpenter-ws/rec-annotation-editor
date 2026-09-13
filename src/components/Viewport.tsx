@@ -87,11 +87,10 @@ function blurActiveExpressionTransactionOwner(): void {
 
 export interface ViewportProps {
   image: ImageInfo;
+  /** Exactly the boxes to draw; the caller decides category isolation. */
   annotations: readonly Annotation[];
   selectedId: string | null;
   highlightedLabel?: string | null;
-  /** When set, only boxes with this label are rendered (category isolation). */
-  visibleLabel?: string | null;
   dispatch: Dispatch<EditorAction>;
   onZoomChange: (scale: number) => void;
   mode: "select" | "add";
@@ -237,7 +236,6 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     annotations,
     selectedId,
     highlightedLabel = null,
-    visibleLabel = null,
     dispatch,
     onZoomChange,
     mode,
@@ -641,9 +639,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
   };
 
-  const renderedAnnotations = visibleLabel
-    ? annotations.filter((annotation) => annotation.label === visibleLabel)
-    : annotations;
+  const renderedAnnotations = annotations;
 
   const startMove = (
     event: PointerEvent<SVGGElement>,

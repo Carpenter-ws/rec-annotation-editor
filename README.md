@@ -35,11 +35,15 @@ On Windows, run the script from Git Bash/WSL, or start the dev server directly:
    - the panel groups cards by their text label: each category header shows the
      expression and how many boxes share it, with every box one level below as
      its own card (ID, expression, exact coordinates);
-   - hover a category to highlight **all** of its boxes on the canvas; click a
-     category to **isolate** it — only its boxes stay visible and the header is
-     highlighted; click it again to show everything;
-   - **Reset** (next to Collapse all) clears the selection and isolation,
-     reveals every box, and re-fits the image;
+   - **the canvas starts clean**: no boxes are drawn until an expression is
+     picked, so a crowded image is readable from the first second;
+   - hover a category to **preview** all of its boxes; click a category to
+     **isolate** it — only its boxes stay on the canvas and the header is
+     highlighted; click it again to go back to a clean canvas. The box selected
+     in the panel (or on the canvas) always stays visible, which is what makes
+     “locate” and resizing work;
+   - **Reset** (next to Collapse all) clears the selected category and the
+     selection, hides every box, and re-fits the image;
    - collapse or reopen a category with its arrow, or use **Collapse all /
      Expand all**; the category of a selected box always reopens;
    - **Add** on a category header draws a new box of that category: drag a

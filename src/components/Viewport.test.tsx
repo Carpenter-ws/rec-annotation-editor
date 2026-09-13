@@ -77,7 +77,6 @@ interface RenderOptions {
   annotations?: Annotation[];
   initialTransform?: ViewTransform;
   selectedId?: string | null;
-  visibleLabel?: string | null;
   viewportRef?: RefObject<ViewportHandle>;
   mode?: "select" | "add";
   onDraftBox?: (bbox: BBox) => void;
@@ -90,7 +89,6 @@ function renderViewport(options: RenderOptions = {}) {
       image={options.image ?? image}
       annotations={options.annotations ?? annotations}
       selectedId={options.selectedId ?? null}
-      visibleLabel={options.visibleLabel}
       dispatch={dispatch}
       initialTransform={options.initialTransform}
       onZoomChange={vi.fn()}
@@ -1035,7 +1033,7 @@ it("ignores an add-mode draft narrower than three screen pixels", () => {
   expect(onDraftBox).not.toHaveBeenCalled();
 });
 
-it("renders only the boxes of the isolated label", () => {
+it("renders exactly the boxes the caller hands it", () => {
   const allAnnotations: Annotation[] = [
     ...duplicateLabels,
     {
@@ -1045,7 +1043,13 @@ it("renders only the boxes of the isolated label", () => {
       reservedField: "0",
     },
   ];
-  renderViewport({ annotations: allAnnotations, visibleLabel: "person" });
+  // Category isolation happens before the viewport, so a filtered list draws
+  // only those boxes.
+  renderViewport({
+    annotations: allAnnotations.filter(
+      (annotation) => annotation.label === "person",
+    ),
+  });
 
   expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
   expect(screen.getByTestId("bbox-ann_002")).toBeVisible();

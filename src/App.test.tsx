@@ -990,6 +990,8 @@ it("highlights and scrolls the exact card selected from a duplicate-label bbox",
         .querySelectorAll<HTMLElement>("[data-annotation-id]"),
     ];
 
+    // The box has to be on the canvas before it can be clicked.
+    await user.click(screen.getByText("person", { exact: true }));
     fireEvent.click(screen.getByTestId("bbox-ann_002"));
 
     expect(cards[0]).not.toHaveAttribute("aria-current");
@@ -3125,6 +3127,71 @@ it("searches and selects one annotation in a 500-box document", async () => {
   expect(within(panel).getByText("ann_417", { exact: true })).toBeVisible();
 }, 60000);
 
+it("keeps the canvas clean until a category is selected", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(
+      "10 20 70 90 person 0\n100 110 180 200 person 0\n0 0 10 10 bicycle 0",
+    ),
+  );
+  await screen.findByText("person", { exact: true });
+
+  // Nothing is drawn until the user picks an expression.
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("bbox-ann_003")).not.toBeInTheDocument();
+
+  await user.click(screen.getByText("bicycle", { exact: true }));
+
+  expect(screen.getByTestId("bbox-ann_003")).toBeVisible();
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+
+  // Selecting another category swaps which boxes are drawn.
+  await user.click(screen.getByText("person", { exact: true }));
+
+  expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
+  expect(screen.getByTestId("bbox-ann_002")).toBeVisible();
+  expect(screen.queryByTestId("bbox-ann_003")).not.toBeInTheDocument();
+
+  // Clicking the active category again clears the canvas.
+  await user.click(screen.getByText("person", { exact: true }));
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+});
+
+it("draws the box of a card selected from the panel", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n100 110 180 200 person 0"),
+  );
+  await screen.findByText("person", { exact: true });
+  expect(screen.queryByTestId("bbox-ann_002")).not.toBeInTheDocument();
+
+  const panel = screen.getByRole("complementary", { name: "Annotations" });
+  await user.click(within(panel).getByText("ann_002", { exact: true }));
+
+  expect(screen.getByTestId("bbox-ann_002")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+});
+
 it("groups panel cards by their text label with one subcard per box", async () => {
   const user = userEvent.setup();
   render(<App />);
@@ -3185,6 +3252,8 @@ it("isolates a category on the canvas when its header is activated", async () =>
   );
   await screen.findByText("person", { exact: true });
 
+  // Pick a category, then select one of its boxes.
+  await user.click(screen.getByText("person", { exact: true }));
   fireEvent.click(screen.getByTestId("bbox-ann_001"));
   await user.click(screen.getByText("bicycle", { exact: true }));
 
@@ -3197,9 +3266,10 @@ it("isolates a category on the canvas when its header is activated", async () =>
   ).toHaveClass("is-active");
   expect(panel.querySelector('[aria-current="true"]')).toBeNull();
 
+  // Turning the category off leaves a clean canvas again.
   await user.click(screen.getByText("bicycle", { exact: true }));
-  expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
-  expect(screen.getByTestId("bbox-ann_002")).toBeVisible();
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("bbox-ann_002")).not.toBeInTheDocument();
   expect(
     panel.querySelector('.annotation-group-header[data-group-label="bicycle"]'),
   ).not.toHaveClass("is-active");
@@ -3224,6 +3294,7 @@ it("resets isolation, selection, and the view with the reset control", async () 
   const imageSpace = screen.getByTestId("image-space");
   const fitScale = imageSpace.getAttribute("data-scale");
 
+  await user.click(screen.getByText("person", { exact: true }));
   fireEvent.click(screen.getByTestId("bbox-ann_001"));
   await user.click(screen.getByText("bicycle", { exact: true }));
   await user.click(screen.getByRole("button", { name: "Zoom in" }));
@@ -3232,11 +3303,8 @@ it("resets isolation, selection, and the view with the reset control", async () 
 
   await user.click(screen.getByRole("button", { name: "Reset" }));
 
-  expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
-  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
-    "data-selected",
-    "false",
-  );
+  // Reset drops the category too, so the canvas is clean again.
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
   expect(imageSpace.getAttribute("data-scale")).toBe(fitScale);
   expect(
     screen
@@ -3333,6 +3401,7 @@ it("highlights every box of a category while it is hovered", async () => {
     '.annotation-group-header[data-group-label="person"]',
   )!;
 
+  // Hovering a header previews its boxes, and only its boxes.
   fireEvent.mouseEnter(personHeader);
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
     "data-highlighted",
@@ -3342,16 +3411,11 @@ it("highlights every box of a category while it is hovered", async () => {
     "data-highlighted",
     "true",
   );
-  expect(screen.getByTestId("bbox-ann_003")).toHaveAttribute(
-    "data-highlighted",
-    "false",
-  );
+  expect(screen.queryByTestId("bbox-ann_003")).not.toBeInTheDocument();
 
+  // Leaving the header takes the preview away again.
   fireEvent.mouseLeave(personHeader);
-  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
-    "data-highlighted",
-    "false",
-  );
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
 });
 
 it("moves a box into another category after editing its expression", async () => {
@@ -3642,9 +3706,11 @@ it("opens a dataset item, edits it, and saves it back to the dataset", async () 
     }),
   );
 
-  expect(await screen.findByTestId("bbox-ann_001")).toBeVisible();
+  expect(await screen.findByText("person", { exact: true })).toBeVisible();
   expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+  // Boxes appear once the expression is picked.
+  await user.click(screen.getByText("person", { exact: true }));
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
     "x",
     "10",
@@ -3705,6 +3771,7 @@ it("scales normalized JSONL dataset targets to image pixels and back", async () 
   expect(within(panel).getByLabelText("Y1")).toHaveValue("1276.56");
   expect(within(panel).getByLabelText("X2")).toHaveValue("1904.64");
   expect(within(panel).getByLabelText("Y2")).toHaveValue("1477.44");
+  await user.click(screen.getByText("the giraffes", { exact: true }));
   const box = screen.getByTestId("bbox-ann_001");
   expect(Number(box.getAttribute("x"))).toBeCloseTo(1831.68, 6);
   expect(Number(box.getAttribute("width"))).toBeCloseTo(72.96, 6);
@@ -3743,6 +3810,7 @@ it("scales normalized JSONL labels once their image arrives later", async () => 
 
   await waitFor(() => expect(screen.getByLabelText("X2")).toHaveValue("400"));
   expect(screen.getByLabelText("Y2")).toHaveValue("300");
+  await user.click(screen.getByText("person", { exact: true }));
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("width", "400");
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("height", "300");
 });
@@ -4264,6 +4332,9 @@ it("re-enters the imported item on the canvas after Confirm import", async () =>
   expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
   expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+
+  await user.click(screen.getByText("person", { exact: true }));
   expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
 });
 

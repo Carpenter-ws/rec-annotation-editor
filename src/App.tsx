@@ -52,6 +52,7 @@ import {
   serializeDocumentJson,
 } from "./domain/serializer";
 import type { Annotation, BBox, ImageBounds, ImageInfo } from "./domain/types";
+import { visibleCanvasAnnotations } from "./domain/visibility";
 import {
   EditorProvider,
   useEditorDispatch,
@@ -230,7 +231,10 @@ function EditorWorkspace(): JSX.Element {
         : null,
     [state.image?.height, state.image?.width],
   );
+  /** A locate request that must wait until its box is actually on the canvas. */
+  const pendingLocateIdRef = useRef<string | null>(null);
   const locateAnnotation = useCallback((id: string) => {
+    pendingLocateIdRef.current = id;
     viewportRef.current?.centerAnnotation(id);
   }, []);
   const showToast = useCallback((message: string) => {
@@ -685,6 +689,26 @@ function EditorWorkspace(): JSX.Element {
     }
   };
 
+  // Boxes only reach the canvas for a picked category, a hovered category, or
+  // the selected box — a fresh document starts with a clean image.
+  const visibleAnnotations = useMemo(
+    () =>
+      visibleCanvasAnnotations(state.annotations, {
+        activeLabel,
+        highlightedLabel,
+        selectedId: state.selectedId,
+      }),
+    [state.annotations, activeLabel, highlightedLabel, state.selectedId],
+  );
+  useEffect(() => {
+    const id = pendingLocateIdRef.current;
+    if (id === null) return;
+    // Locating a box that the canvas has not drawn yet (no category picked,
+    // selection not applied) is retried once it becomes visible.
+    if (!visibleAnnotations.some((annotation) => annotation.id === id)) return;
+    pendingLocateIdRef.current = null;
+    viewportRef.current?.centerAnnotation(id);
+  }, [visibleAnnotations]);
   const readyDatasetItems = useMemo(
     () =>
       datasetView
@@ -993,10 +1017,9 @@ function EditorWorkspace(): JSX.Element {
             <Viewport
               ref={viewportRef}
               image={state.image}
-              annotations={state.annotations}
+              annotations={visibleAnnotations}
               selectedId={state.selectedId}
-              highlightedLabel={highlightedLabel}
-              visibleLabel={activeLabel}
+              highlightedLabel={highlightedLabel ?? activeLabel}
               dispatch={dispatch}
               onZoomChange={setZoomScale}
               mode={state.mode}

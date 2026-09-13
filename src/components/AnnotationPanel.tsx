@@ -164,9 +164,11 @@ export function AnnotationPanel({
     [ensureExpanded],
   );
 
+  // Activation replaces the hover preview, so clicking a category and clicking
+  // it again really does show and then hide its boxes.
   const activateGroup = useCallback(
     (group: LabelGroup) => {
-      onHighlightLabel?.(group.label);
+      onHighlightLabel?.(null);
       onActivateLabel?.(group.label);
     },
     [onActivateLabel, onHighlightLabel],
@@ -249,7 +251,7 @@ export function AnnotationPanel({
             <button
               type="button"
               className="panel-groups-toggle"
-              title="Clear selection, show every box, and fit the image"
+              title="Clear the selected category, hide every box, and fit the image"
               onClick={onReset}
             >
               Reset
