@@ -3928,9 +3928,10 @@ it("moves between dataset items with Alt+Arrow keys", async () => {
   expect(await screen.findByDisplayValue("alpha")).toBeVisible();
 });
 
-it("uploads image and label pairs into a dataset", async () => {
+it("stages chosen files locally and imports them on Confirm import", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([{ width: 400, height: 300 }]);
   mockedApi.listDatasets
     .mockResolvedValueOnce([])
     .mockResolvedValue([
@@ -3953,7 +3954,12 @@ it("uploads image and label pairs into a dataset", async () => {
   );
   await user.click(within(dialog).getByRole("button", { name: "Create dataset" }));
 
-  // The freshly created dataset expands itself.
+  // There is no manual upload step any more.
+  expect(
+    within(dialog).queryByRole("button", { name: "Upload" }),
+  ).not.toBeInTheDocument();
+
+  // The freshly created dataset expands itself and reads files immediately.
   await user.upload(
     within(dialog).getByLabelText("Choose dataset files for dji"),
     [
@@ -3961,7 +3967,19 @@ it("uploads image and label pairs into a dataset", async () => {
       textFile('{"expression": "x", "targets": [[0, 0, 5, 5]]}', "a.jsonl"),
     ],
   );
-  await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+
+  await waitFor(() =>
+    expect(within(dialog).getByText("400 × 300")).toBeVisible(),
+  );
+  expect(within(dialog).getByText("1 box")).toBeVisible();
+  expect(within(dialog).getByTestId("staged-summary")).toHaveTextContent(
+    "2 files ready to import",
+  );
+  expect(datasetApi.uploadDatasetItems).not.toHaveBeenCalled();
+
+  await user.click(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  );
 
   await waitFor(() =>
     expect(datasetApi.uploadDatasetItems).toHaveBeenCalledWith("dji", [
@@ -3973,11 +3991,128 @@ it("uploads image and label pairs into a dataset", async () => {
     ]),
   );
   expect(mockedApi.listDatasets).toHaveBeenCalledTimes(3);
+  expect(within(dialog).queryByLabelText("Staged files")).not.toBeInTheDocument();
 });
 
-it("accepts images and labels in separate upload passes", async () => {
+it("shows a per-file loading state until a staged file is ready", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets.mockResolvedValue([{ name: "dji", items: [] }]);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+
+  const labels = deferredTextFile("a.jsonl");
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    [labels.file],
+  );
+
+  expect(
+    within(dialog).getByRole("progressbar", { name: "Loading a.jsonl" }),
+  ).toBeVisible();
+  expect(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  ).toBeDisabled();
+
+  labels.resolve('{"expression": "x", "targets": [[0, 0, 5, 5]]}');
+
+  await waitFor(() => expect(within(dialog).getByText("1 box")).toBeVisible());
+  expect(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  ).toBeEnabled();
+});
+
+it("blocks the import until a failed file is removed", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets.mockResolvedValue([{ name: "dji", items: [] }]);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    textFile("10 10 5 5 broken 0", "a.txt"),
+  );
+  // Dropped files bypass the picker's accept filter, so they must be rejected
+  // by the staging step rather than silently ignored.
+  fireEvent.drop(within(dialog).getByTestId("dataset-dropzone-dji"), {
+    dataTransfer: { files: [textFile("done", "notes.pdf")] },
+  });
+
+  await waitFor(() =>
+    expect(
+      within(dialog).getByText("Line 1: invalid bounding box"),
+    ).toBeVisible(),
+  );
+  expect(
+    within(dialog).getByText(
+      "Unsupported file type — use an image or a .txt/.jsonl label file.",
+    ),
+  ).toBeVisible();
+  expect(within(dialog).getByTestId("staged-summary")).toHaveTextContent(
+    "2 need attention",
+  );
+  expect(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  ).toBeDisabled();
+
+  await user.click(within(dialog).getByRole("button", { name: "Remove a.txt" }));
+  await user.click(
+    within(dialog).getByRole("button", { name: "Remove notes.pdf" }),
+  );
+
+  expect(within(dialog).queryByLabelText("Staged files")).not.toBeInTheDocument();
+  expect(datasetApi.uploadDatasetItems).not.toHaveBeenCalled();
+});
+
+it("discards staged files and their previews when cancelled", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  const { createObjectURL, revokeObjectURL } = mockImageEnvironment([
+    { width: 400, height: 300 },
+  ]);
+  mockedApi.listDatasets.mockResolvedValue([{ name: "dji", items: [] }]);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+
+  await user.upload(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+    new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
+  );
+  await waitFor(() =>
+    expect(within(dialog).getByText("400 × 300")).toBeVisible(),
+  );
+
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+  expect(
+    screen.queryByRole("dialog", { name: "Datasets" }),
+  ).not.toBeInTheDocument();
+  expect(datasetApi.uploadDatasetItems).not.toHaveBeenCalled();
+  expect(revokeObjectURL).toHaveBeenCalledWith(
+    createObjectURL.mock.results[0]?.value,
+  );
+});
+
+it("accepts images and labels in separate import passes", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([{ width: 400, height: 300 }]);
   const imageOnly = {
     name: "dji",
     items: [{ stem: "a", image: "a.jpg", labels: null }],
@@ -4006,7 +4141,12 @@ it("accepts images and labels in separate upload passes", async () => {
     within(dialog).getByLabelText("Choose dataset files for dji"),
     new File(["image-bytes"], "a.jpg", { type: "image/jpeg" }),
   );
-  await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+  await waitFor(() =>
+    expect(within(dialog).getByText("400 × 300")).toBeVisible(),
+  );
+  await user.click(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  );
 
   await waitFor(() =>
     expect(datasetApi.uploadDatasetItems).toHaveBeenNthCalledWith(1, "dji", [
@@ -4027,7 +4167,10 @@ it("accepts images and labels in separate upload passes", async () => {
     within(dialog).getByLabelText("Choose dataset files for dji"),
     textFile('{"expression": "x", "targets": [[0, 0, 5, 5]]}', "a.jsonl"),
   );
-  await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+  await waitFor(() => expect(within(dialog).getByText("1 box")).toBeVisible());
+  await user.click(
+    within(dialog).getByRole("button", { name: "Confirm import" }),
+  );
 
   await waitFor(() =>
     expect(datasetApi.uploadDatasetItems).toHaveBeenNthCalledWith(2, "dji", [
@@ -4042,9 +4185,6 @@ it("accepts images and labels in separate upload passes", async () => {
   );
   expect(dialog).toHaveTextContent("1 of 1 item(s) ready to open.");
   expect(dialog).toHaveTextContent("image + labels");
-  await expect(
-    within(dialog).getByRole("button", { name: "Confirm import" }),
-  ).toBeVisible();
 });
 
 it("leaves Add Box mode once when Escape is pressed before a draft exists", async () => {

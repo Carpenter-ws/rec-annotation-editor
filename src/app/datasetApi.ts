@@ -33,23 +33,37 @@ const IMAGE_FILE_PATTERN =
   /\.(?:apng|avif|bmp|gif|heic|heif|ico|jfif|jpe?g|png|svg|tiff?|webp)$/i;
 const LABEL_FILE_PATTERN = /\.(?:txt|jsonl)$/i;
 
+export type DatasetFileKind = "image" | "labels";
+
+/** Classifies a file by extension; `null` when the dataset cannot store it. */
+export function classifyDatasetFile(fileName: string): DatasetFileKind | null {
+  if (IMAGE_FILE_PATTERN.test(fileName)) return "image";
+  if (LABEL_FILE_PATTERN.test(fileName)) return "labels";
+  return null;
+}
+
+/** Basename without extension; pairs one image with one label file. */
+export function datasetFileStem(fileName: string): string {
+  return fileName.replace(/\.[^./\\]+$/, "");
+}
+
 /**
  * Groups one upload batch by file stem. Images and labels may arrive in
  * separate batches — the caller uploads whatever it gets and the server merges
  * halves that share a stem.
  */
 export function planDatasetUpload(files: readonly File[]): DatasetUploadPlan {
-  const stemOf = (name: string) => name.replace(/\.[^./\\]+$/, "");
   const keyOf = (stem: string) => stem.toLocaleLowerCase();
 
   const items = new Map<string, DatasetUploadItem>();
   const unsupported: File[] = [];
 
   for (const file of files) {
-    const stem = stemOf(file.name);
+    const stem = datasetFileStem(file.name);
     const key = keyOf(stem);
+    const kind = classifyDatasetFile(file.name);
 
-    if (IMAGE_FILE_PATTERN.test(file.name)) {
+    if (kind === "image") {
       const item = items.get(key) ?? { stem };
       if (item.image) {
         unsupported.push(file);
@@ -59,7 +73,7 @@ export function planDatasetUpload(files: readonly File[]): DatasetUploadPlan {
       items.set(key, item);
       continue;
     }
-    if (LABEL_FILE_PATTERN.test(file.name)) {
+    if (kind === "labels") {
       const item = items.get(key) ?? { stem };
       if (item.labels) {
         unsupported.push(file);

@@ -88,10 +88,19 @@ backend):
 
 - **Create dataset** — a group is a folder with `images/`, `labels/`, and a
   `dataset.json` manifest.
-- **Choose files → Upload** — upload in as many passes as you like: a batch of
-  images first, then the matching `.txt`/`.jsonl` labels (or vice versa). Files
-  are merged by basename (`DJI_0001.jpg` + `DJI_0001.jsonl`). Files with other
-  extensions, or a duplicate stem inside one batch, are skipped and reported.
+- **Drop or choose files — they load immediately** — as soon as files are
+  picked (file dialog or drag and drop) they are read in the browser and each
+  one gets a row with its own progress: a spinner while loading, then a
+  thumbnail plus `3840 × 2160` for images, `12 boxes` for label files, or an
+  explicit error. Nothing is sent to the server yet.
+- **Confirm import** is the only step that reaches the backend: the staged
+  batch is uploaded in one request and merged by basename
+  (`DJI_0001.jpg` + `DJI_0001.jsonl`). **Cancel** (or `Close` when nothing is
+  staged) throws the staged files away without touching the server.
+- Batches may be split: images first, matching labels later (or vice versa).
+  Unsupported extensions, duplicate stems, unreadable images, and label files
+  with parse errors are flagged in their row — **Confirm import** stays
+  disabled until every remaining row is ready, and a `×` removes a row.
 - Each item shows its state — `image + labels`, `labels pending`, or
   `image pending` — and **Open** is enabled once both halves exist. The
   dialog header reports how many items are ready.
@@ -105,7 +114,7 @@ backend):
   item shown in the toolbar. Switching with unsaved edits asks first
   (**Keep editing** / **Discard and switch**) — edits are never dropped
   silently.
-- **Confirm import** closes the dialog; items, files, and edits stay on disk.
+- Once imported, items, files, and edits stay on disk.
 - Delete items or whole datasets from the same dialog.
 
 ## REC JSONL format

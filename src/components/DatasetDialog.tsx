@@ -4,11 +4,19 @@ import {
   deleteDataset,
   deleteDatasetItem,
   listDatasets,
-  planDatasetUpload,
   uploadDatasetItems,
   type DatasetItem,
   type DatasetSummary,
 } from "../app/datasetApi";
+import {
+  createStagedFile,
+  markDuplicateStems,
+  readStagedDatasetFile,
+  revokeStagedFiles,
+  stagedFilesSummary,
+  stagedFilesToUploadItems,
+  type StagedDatasetFile,
+} from "../app/datasetStaging";
 
 export interface DatasetDialogProps {
   open: boolean;
@@ -30,11 +38,39 @@ export function DatasetDialog({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [expandedName, setExpandedName] = useState<string | null>(null);
+  const [staged, setStaged] = useState<StagedDatasetFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Staged files hold object URLs, so every drop path must be observable from
+  // callbacks without waiting for a render.
+  const stagedRef = useRef<StagedDatasetFile[]>([]);
+  stagedRef.current = staged;
+  const stageGenerationRef = useRef(0);
+  const stagedIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      stageGenerationRef.current += 1;
+      revokeStagedFiles(stagedRef.current);
+    };
+  }, []);
+
+  const replaceStaged = useCallback((next: StagedDatasetFile[]) => {
+    stagedRef.current = next;
+    setStaged(next);
+  }, []);
+
+  const clearStaged = useCallback(() => {
+    stageGenerationRef.current += 1;
+    revokeStagedFiles(stagedRef.current);
+    replaceStaged([]);
+  }, [replaceStaged]);
 
   const refresh = useCallback(async (): Promise<boolean> => {
     setLoading(true);
@@ -54,13 +90,57 @@ export function DatasetDialog({
     if (!open) return;
     setExpandedName(null);
     setError(null);
-    setWarning(null);
     setSummary(null);
     setNewName("");
+    clearStaged();
     void refresh();
-  }, [open, refresh]);
+  }, [open, refresh, clearStaged]);
 
   if (!open) return null;
+
+  const toggleDataset = (name: string) => {
+    if (expandedName !== name) clearStaged();
+    setExpandedName(expandedName === name ? null : name);
+  };
+
+  /** Files are read and validated locally the moment they are chosen. */
+  const stageFiles = (files: readonly File[]) => {
+    if (files.length === 0 || busy) return;
+    setSummary(null);
+    setError(null);
+
+    const generation = ++stageGenerationRef.current;
+    const skeletons = files.map((file) =>
+      createStagedFile(file, `staged-${++stagedIdRef.current}`),
+    );
+    replaceStaged(
+      markDuplicateStems([...stagedRef.current, ...skeletons]),
+    );
+
+    for (const skeleton of skeletons) {
+      void readStagedDatasetFile(skeleton).then((stagedFile) => {
+        if (!mountedRef.current || stageGenerationRef.current !== generation) {
+          revokeStagedFiles([stagedFile]);
+          return;
+        }
+        replaceStaged(
+          markDuplicateStems(
+            stagedRef.current.map((entry) =>
+              entry.id === stagedFile.id ? stagedFile : entry,
+            ),
+          ),
+        );
+      });
+    }
+  };
+
+  const removeStaged = (id: string) => {
+    const target = stagedRef.current.find((file) => file.id === id);
+    if (target) revokeStagedFiles([target]);
+    replaceStaged(
+      markDuplicateStems(stagedRef.current.filter((file) => file.id !== id)),
+    );
+  };
 
   const handleCreate = async () => {
     const name = newName.trim();
@@ -83,7 +163,10 @@ export function DatasetDialog({
     setBusy(true);
     try {
       await deleteDataset(name);
-      if (expandedName === name) setExpandedName(null);
+      if (expandedName === name) {
+        clearStaged();
+        setExpandedName(null);
+      }
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete dataset.");
@@ -105,35 +188,34 @@ export function DatasetDialog({
     }
   };
 
-  const handleUpload = async (name: string) => {
-    const input = fileInputRef.current;
-    const files = [...(input?.files ?? [])];
-    if (files.length === 0 || busy) return;
-    const plan = planDatasetUpload(files);
+  /** Confirm import is the single point where the batch reaches the backend. */
+  const handleConfirmImport = async () => {
+    const items = stagedFilesToUploadItems(stagedRef.current);
+    if (!expandedName || busy || items.length === 0) return;
     setBusy(true);
+    setError(null);
     try {
-      if (plan.items.length > 0) {
-        const updated = await uploadDatasetItems(name, plan.items);
-        const ready = updated.items.filter(
-          (item) => item.image && item.labels,
-        ).length;
-        setSummary(
-          `Uploaded ${plan.items.length} item(s) — ${ready} of ${updated.items.length} complete. Upload the matching files (same name) to finish the rest.`,
-        );
-      }
-      setWarning(
-        plan.unsupported.length > 0
-          ? `${plan.unsupported.length} file(s) skipped — only images and .txt/.jsonl labels are supported, one file per stem.`
-          : null,
+      const updated = await uploadDatasetItems(expandedName, items);
+      const ready = updated.items.filter(
+        (item) => item.image && item.labels,
+      ).length;
+      setSummary(
+        `Imported ${items.length} item(s) — ${ready} of ${updated.items.length} complete. Upload the matching files (same name) to finish the rest.`,
       );
-      if (input) input.value = "";
+      clearStaged();
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not upload files.");
+      setError(cause instanceof Error ? cause.message : "Could not import files.");
     } finally {
       setBusy(false);
     }
   };
+
+  const stagedSummary = stagedFilesSummary(staged);
+  const canConfirm =
+    staged.length > 0 &&
+    !busy &&
+    staged.every((file) => file.status === "ready");
 
   return (
     <div className="dataset-dialog-backdrop">
@@ -170,8 +252,7 @@ export function DatasetDialog({
         {loading ? <p>Loading datasets…</p> : null}
         {!loading && datasets.length === 0 ? (
           <p className="dataset-empty">
-            No datasets yet. Create one, then batch-upload image and label
-            pairs.
+            No datasets yet. Create one, then add image and label pairs.
           </p>
         ) : null}
         <ul className="dataset-list">
@@ -185,7 +266,7 @@ export function DatasetDialog({
                     className="dataset-expand"
                     aria-expanded={expanded}
                     aria-label={`Toggle ${dataset.name} items`}
-                    onClick={() => setExpandedName(expanded ? null : dataset.name)}
+                    onClick={() => toggleDataset(dataset.name)}
                   >
                     {expanded ? "▾" : "▸"}
                   </button>
@@ -202,7 +283,15 @@ export function DatasetDialog({
                 </div>
                 {expanded ? (
                   <div className="dataset-items">
-                    <div className="dataset-actions">
+                    <div
+                      className="dataset-dropzone"
+                      data-testid={`dataset-dropzone-${dataset.name}`}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        stageFiles([...event.dataTransfer.files]);
+                      }}
+                    >
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -210,7 +299,18 @@ export function DatasetDialog({
                         accept="image/*,.txt,.jsonl"
                         aria-label={`Choose dataset files for ${dataset.name}`}
                         hidden
+                        onChange={(event) => {
+                          const input = event.currentTarget;
+                          const files = [...(input.files ?? [])];
+                          input.value = "";
+                          stageFiles(files);
+                        }}
                       />
+                      <p>
+                        Drop images and <code>.txt</code>/<code>.jsonl</code>{" "}
+                        labels here — they load right away and are only sent to
+                        the server when you confirm.
+                      </p>
                       <button
                         type="button"
                         disabled={busy}
@@ -218,25 +318,75 @@ export function DatasetDialog({
                       >
                         Choose files
                       </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void handleUpload(dataset.name)}
-                      >
-                        Upload
-                      </button>
                     </div>
+                    {staged.length > 0 ? (
+                      <ul className="dataset-staged" aria-label="Staged files">
+                        {staged.map((file) => (
+                          <li
+                            key={file.id}
+                            data-staged-name={file.name}
+                            data-staged-status={file.status}
+                          >
+                            {file.previewUrl ? (
+                              <img
+                                className="staged-thumb"
+                                src={file.previewUrl}
+                                alt=""
+                              />
+                            ) : (
+                              <span className="staged-kind" aria-hidden="true">
+                                {file.kind === "image"
+                                  ? "IMG"
+                                  : file.kind === "labels"
+                                    ? "LBL"
+                                    : "?"}
+                              </span>
+                            )}
+                            <span className="staged-name">{file.name}</span>
+                            {file.status === "reading" ? (
+                              <span
+                                className="staged-spinner"
+                                role="progressbar"
+                                aria-label={`Loading ${file.name}`}
+                              />
+                            ) : file.status === "error" ? (
+                              <span className="staged-detail is-error">
+                                {file.error}
+                              </span>
+                            ) : (
+                              <span className="staged-detail">
+                                {file.detail}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${file.name}`}
+                              onClick={() => removeStaged(file.id)}
+                            >
+                              ×
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {stagedSummary ? (
+                      <p className="dataset-summary" data-testid="staged-summary">
+                        {stagedSummary}
+                      </p>
+                    ) : null}
                     {summary ? <p className="dataset-summary">{summary}</p> : null}
-                    {warning ? <p className="dataset-warning">{warning}</p> : null}
                     {dataset.items.length === 0 ? (
                       <p className="dataset-empty">
-                        No items yet. Select images, labels, or both, then
-                        Upload — images and labels can be uploaded in separate
-                        passes as long as they share the same name.
+                        No items yet. Add images, labels, or both — images and
+                        labels can arrive in separate batches as long as they
+                        share the same name.
                       </p>
                     ) : (
                       <>
-                        <p className="dataset-summary" data-testid={`dataset-ready-${dataset.name}`}>
+                        <p
+                          className="dataset-summary"
+                          data-testid={`dataset-ready-${dataset.name}`}
+                        >
                           {
                             dataset.items.filter(
                               (item) => item.image && item.labels,
@@ -271,7 +421,7 @@ export function DatasetDialog({
                                   title={
                                     ready
                                       ? undefined
-                                      : "Upload both the image and its label file first"
+                                      : "Add both the image and its label file first"
                                   }
                                   onClick={() => {
                                     onOpenItem(dataset.name, item, dataset.items);
@@ -302,7 +452,21 @@ export function DatasetDialog({
           })}
         </ul>
         <div className="dataset-dialog-footer">
-          <button type="button" onClick={onClose}>
+          <button
+            type="button"
+            onClick={() => {
+              clearStaged();
+              onClose();
+            }}
+          >
+            {staged.length > 0 ? "Cancel" : "Close"}
+          </button>
+          <button
+            type="button"
+            aria-busy={busy}
+            disabled={!canConfirm}
+            onClick={() => void handleConfirmImport()}
+          >
             Confirm import
           </button>
         </div>

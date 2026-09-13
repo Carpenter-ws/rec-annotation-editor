@@ -30,7 +30,10 @@ test("switches between images of one dataset", async ({ page }) => {
       buffer: Buffer.from(secondLabels),
     },
   ]);
-  await row.getByRole("button", { name: "Upload" }).click();
+  await expect(row.getByTestId("staged-summary")).toContainText(
+    "4 files ready to import",
+  );
+  await dialog.getByRole("button", { name: "Confirm import" }).click();
   await expect(row.getByText("2 of 2 item(s) ready to open.")).toBeVisible();
 
   // Open the second item and step back with the toolbar buttons.
@@ -88,16 +91,22 @@ test("persists a dataset across page reloads", async ({ page }) => {
   await expect(row).toBeVisible();
   const fileInput = row.getByLabel("Choose dataset files for e2e-dataset");
 
-  // First pass: upload the image alone.
+  // First pass: add the image alone; it is staged locally, then imported.
   await fileInput.setInputFiles([example("rec-aerial-scene.svg")]);
-  await row.getByRole("button", { name: "Upload" }).click();
+  await expect(row.getByTestId("staged-summary")).toContainText(
+    "1 file ready to import",
+  );
+  await dialog.getByRole("button", { name: "Confirm import" }).click();
   await expect(row.getByText("labels pending")).toBeVisible();
   await expect(row.getByRole("button", { name: "Open" })).toBeDisabled();
   await expect(row.getByText("0 of 1 item(s) ready to open.")).toBeVisible();
 
-  // Second pass: upload the matching labels; the item becomes openable.
+  // Second pass: add the matching labels; the item becomes openable.
   await fileInput.setInputFiles([example("rec-aerial-scene.txt")]);
-  await row.getByRole("button", { name: "Upload" }).click();
+  await expect(row.getByTestId("staged-summary")).toContainText(
+    "1 file ready to import",
+  );
+  await dialog.getByRole("button", { name: "Confirm import" }).click();
   await expect(row.getByText("image + labels")).toBeVisible();
   await expect(row.getByText("1 of 1 item(s) ready to open.")).toBeVisible();
   await expect(row.getByRole("button", { name: "Open" })).toBeEnabled();
