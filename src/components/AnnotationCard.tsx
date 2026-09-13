@@ -19,12 +19,18 @@ const coordinateLabels: Record<Coordinate, string> = {
   y2: "Y2",
 };
 
+/** Keeps converted coordinates readable (1831.6799999999998 -> 1831.68). */
+function formatCoordinate(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  return String(Math.round(value * 100) / 100);
+}
+
 function bboxStrings(bbox: Annotation["bbox"]): Record<Coordinate, string> {
   return {
-    x1: String(bbox.x1),
-    y1: String(bbox.y1),
-    x2: String(bbox.x2),
-    y2: String(bbox.y2),
+    x1: formatCoordinate(bbox.x1),
+    y1: formatCoordinate(bbox.y1),
+    x2: formatCoordinate(bbox.x2),
+    y2: formatCoordinate(bbox.y2),
   };
 }
 
@@ -70,23 +76,12 @@ export const AnnotationCard = memo(function AnnotationCard({
 
   useEffect(() => {
     legalBBoxRef.current = annotation.bbox;
+    const next = bboxStrings(annotation.bbox);
     setCoordinates((current) => ({
-      x1:
-        activeCoordinateRef.current === "x1"
-          ? current.x1
-          : String(annotation.bbox.x1),
-      y1:
-        activeCoordinateRef.current === "y1"
-          ? current.y1
-          : String(annotation.bbox.y1),
-      x2:
-        activeCoordinateRef.current === "x2"
-          ? current.x2
-          : String(annotation.bbox.x2),
-      y2:
-        activeCoordinateRef.current === "y2"
-          ? current.y2
-          : String(annotation.bbox.y2),
+      x1: activeCoordinateRef.current === "x1" ? current.x1 : next.x1,
+      y1: activeCoordinateRef.current === "y1" ? current.y1 : next.y1,
+      x2: activeCoordinateRef.current === "x2" ? current.x2 : next.x2,
+      y2: activeCoordinateRef.current === "y2" ? current.y2 : next.y2,
     }));
   }, [
     annotation.bbox.x1,

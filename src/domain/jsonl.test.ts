@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isJsonlLabelFile,
   parseJsonlAnnotations,
+  scaleAnnotationsToPixels,
   serializeAnnotationsJsonl,
 } from "./jsonl";
 import type { Annotation } from "./types";
@@ -102,6 +103,117 @@ describe("parseJsonlAnnotations", () => {
 
     expect(result.annotations).toEqual([]);
     expect(result.issues).toHaveLength(1);
+  });
+});
+
+describe("normalized [0, 1000] coordinates", () => {
+  const image = { width: 1920, height: 1080 };
+
+  it("scales normalized targets to pixels while parsing", () => {
+    const result = parseJsonlAnnotations(
+      '{"expression": "the white boats", "targets": [[0, 0, 1000, 1000], [3, 46, 117, 62]]}',
+      image,
+    );
+
+    expect(result.issues).toEqual([]);
+    expect(result.annotations[0]?.bbox).toEqual({
+      x1: 0,
+      y1: 0,
+      x2: 1920,
+      y2: 1080,
+    });
+    const scaled = result.annotations[1]!.bbox;
+    expect(scaled.x1).toBeCloseTo(5.76, 10);
+    expect(scaled.y1).toBeCloseTo(49.68, 10);
+    expect(scaled.x2).toBeCloseTo(224.64, 10);
+    expect(scaled.y2).toBeCloseTo(66.96, 10);
+  });
+
+  it("scales an existing annotation list to pixels", () => {
+    const scaled = scaleAnnotationsToPixels(
+      [
+        {
+          id: "ann_001",
+          bbox: { x1: 0, y1: 0, x2: 500, y2: 500 },
+          label: "person",
+          reservedField: null,
+        },
+      ],
+      image,
+    );
+
+    expect(scaled[0]?.bbox).toEqual({ x1: 0, y1: 0, x2: 960, y2: 540 });
+    expect(scaled[0]?.id).toBe("ann_001");
+  });
+
+  it("writes pixels back as rounded normalized integers", () => {
+    const output = serializeAnnotationsJsonl(
+      [
+        {
+          id: "ann_001",
+          bbox: { x1: 5.76, y1: 49.68, x2: 224.64, y2: 66.96 },
+          label: "the white boats",
+          reservedField: null,
+        },
+      ],
+      image,
+    );
+
+    expect(JSON.parse(output.trim())).toEqual({
+      expression: "the white boats",
+      targets: [[3, 46, 117, 62]],
+    });
+  });
+
+  it("clamps saved targets into [0, 1000] and keeps them non-degenerate", () => {
+    const output = serializeAnnotationsJsonl(
+      [
+        {
+          id: "ann_001",
+          bbox: { x1: -50, y1: -50, x2: 5000, y2: 5000 },
+          label: "huge",
+          reservedField: null,
+        },
+        {
+          id: "ann_002",
+          bbox: { x1: 1000, y1: 1000, x2: 1000.2, y2: 1000.3 },
+          label: "tiny",
+          reservedField: null,
+        },
+      ],
+      image,
+    );
+
+    const lines = output.trim().split("\n").map((line) => JSON.parse(line));
+    expect(lines[0].targets).toEqual([[0, 0, 1000, 1000]]);
+    const [x1, y1, x2, y2] = lines[1].targets[0];
+    expect(x1).toBeGreaterThanOrEqual(0);
+    expect(x2).toBeGreaterThan(x1);
+    expect(y2).toBeGreaterThan(y1);
+    expect(x2).toBeLessThanOrEqual(1000);
+    expect(y2).toBeLessThanOrEqual(1000);
+  });
+
+  it("keeps raw coordinates when no image size is known yet", () => {
+    const parsed = parseJsonlAnnotations(
+      '{"expression": "person", "targets": [[0, 0, 500, 500]]}',
+    );
+    expect(parsed.annotations[0]?.bbox).toEqual({
+      x1: 0,
+      y1: 0,
+      x2: 500,
+      y2: 500,
+    });
+
+    const output = serializeAnnotationsJsonl([
+      {
+        id: "ann_001",
+        bbox: { x1: 0, y1: 0, x2: 500, y2: 500 },
+        label: "person",
+        reservedField: null,
+      },
+    ]);
+    expect(JSON.parse(output.trim()).targets).toEqual([[0, 0, 500, 500]]);
   });
 });
 

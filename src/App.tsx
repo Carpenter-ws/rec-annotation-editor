@@ -42,6 +42,7 @@ import { clampBBox } from "./domain/bbox";
 import {
   isJsonlLabelFile,
   parseJsonlAnnotations,
+  scaleAnnotationsToPixels,
   serializeAnnotationsJsonl,
 } from "./domain/jsonl";
 import { parseAnnotationText } from "./domain/parser";
@@ -177,6 +178,8 @@ function EditorWorkspace(): JSX.Element {
     dataset: string;
     labelsFile: string;
   } | null>(null);
+  /** JSONL labels whose normalized targets still await an image size. */
+  const normalizedSourceRef = useRef(false);
   const [toast, setToast] = useState<{ key: number; message: string } | null>(
     null,
   );
@@ -339,6 +342,15 @@ function EditorWorkspace(): JSX.Element {
         );
         if (!isCurrent()) return;
 
+        // Dataset JSONL files store normalized [0, 1000] targets.
+        const annotations = isJsonlLabelFile(labelsFile)
+          ? scaleAnnotationsToPixels(parsed.annotations, {
+              width: image.width,
+              height: image.height,
+            })
+          : parsed.annotations;
+        normalizedSourceRef.current = false;
+
         datasetContextRef.current = {
           dataset: datasetName,
           labelsFile,
@@ -347,7 +359,7 @@ function EditorWorkspace(): JSX.Element {
           type: "COMMIT_IMPORT",
           image,
           annotationBaseline: {
-            annotations: parsed.annotations,
+            annotations,
             fileName: labelsFile,
           },
         });
@@ -430,6 +442,7 @@ function EditorWorkspace(): JSX.Element {
       (file) => `Rejected "${file.name}": unsupported or extra file.`,
     );
     let importedAnnotations: Annotation[] | undefined;
+    let labelsNormalized = false;
 
     if (files.labels) {
       let text: string;
@@ -446,7 +459,10 @@ function EditorWorkspace(): JSX.Element {
 
       if (!isCurrent()) return;
 
-      const parsed = isJsonlLabelFile(files.labels.name)
+      // JSONL targets live on a normalized [0, 1000] grid; they are scaled to
+      // pixels below, once the image size of this import is known.
+      labelsNormalized = isJsonlLabelFile(files.labels.name);
+      const parsed = labelsNormalized
         ? parseJsonlAnnotations(text)
         : parseAnnotationText(text);
       if (parsed.issues.length > 0) {
@@ -481,9 +497,28 @@ function EditorWorkspace(): JSX.Element {
     }
 
     const latestState = stateRef.current;
-    const annotations = importedAnnotations ?? latestState.annotations;
+    let annotations = importedAnnotations ?? latestState.annotations;
     const labelFileName = files.labels?.name ?? latestState.labelFileName;
     const image = loadedImage ?? latestState.image;
+
+    if (labelsNormalized && image) {
+      annotations = scaleAnnotationsToPixels(annotations, {
+        width: image.width,
+        height: image.height,
+      });
+      normalizedSourceRef.current = false;
+    } else if (labelsNormalized) {
+      // No image yet: keep the normalized grid and scale it when one arrives.
+      normalizedSourceRef.current = true;
+    } else if (importedAnnotations) {
+      normalizedSourceRef.current = false;
+    } else if (loadedImage && normalizedSourceRef.current) {
+      annotations = scaleAnnotationsToPixels(annotations, {
+        width: loadedImage.width,
+        height: loadedImage.height,
+      });
+      normalizedSourceRef.current = false;
+    }
 
     let clamped: ClampedAnnotations = {
       annotations: [...annotations],
@@ -610,9 +645,12 @@ function EditorWorkspace(): JSX.Element {
       latestState.image?.name ?? null,
     );
     const saveJsonl = isJsonlLabelFile(fileName);
+    const jsonlScale = latestState.image
+      ? { width: latestState.image.width, height: latestState.image.height }
+      : null;
     try {
       const contents = saveJsonl
-        ? serializeAnnotationsJsonl(snapshot)
+        ? serializeAnnotationsJsonl(snapshot, jsonlScale)
         : serializeAnnotationsTxt(snapshot);
       if (datasetContextRef.current) {
         const { dataset, labelsFile } = datasetContextRef.current;
@@ -671,10 +709,13 @@ function EditorWorkspace(): JSX.Element {
     const saveJsonl = isJsonlLabelFile(
       editedTxtName(latestState.labelFileName, latestState.image?.name ?? null),
     );
+    const jsonlScale = latestState.image
+      ? { width: latestState.image.width, height: latestState.image.height }
+      : null;
     try {
       const result = await saveTextAs(
         saveJsonl
-          ? serializeAnnotationsJsonl(snapshot)
+          ? serializeAnnotationsJsonl(snapshot, jsonlScale)
           : serializeAnnotationsTxt(snapshot),
         editedTxtName(latestState.labelFileName, latestState.image?.name ?? null),
         saveJsonl ? "application/x-ndjson" : "text/plain",
@@ -701,7 +742,15 @@ function EditorWorkspace(): JSX.Element {
         format === "txt"
           ? serializeAnnotationsTxt(latestState.annotations)
           : format === "jsonl"
-            ? serializeAnnotationsJsonl(latestState.annotations)
+            ? serializeAnnotationsJsonl(
+                latestState.annotations,
+                latestState.image
+                  ? {
+                      width: latestState.image.width,
+                      height: latestState.image.height,
+                    }
+                  : null,
+              )
             : serializeDocumentJson(latestState);
       downloadText(
         contents,

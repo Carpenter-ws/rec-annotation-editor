@@ -110,6 +110,15 @@ editing, save, and export:
 {"expression": "the white boats", "level": "L2", "targets": [[636, 790, 665, 837]]}
 ```
 
+Targets are **normalized integers on a [0, 1000] grid**, not pixels:
+
+- pixel = target / 1000 × image width (or height)
+- importing scales them to pixels, so boxes land in the right place on the
+  image; the panel and the canvas always work in image pixels
+- saving and *Export JSONL* convert them back with
+  `round(pixel / size × 1000)`, clamped to `[0, 1000]` and kept non-degenerate
+  so the file stays valid
+
 Every target becomes one box sharing the expression; boxes that share a label
 are regrouped into one `targets` line on export. The auxiliary `level` field is
 not preserved by the editor (per-box metadata is out of scope) — keep a backup

@@ -3670,6 +3670,83 @@ it("opens a dataset item, edits it, and saves it back to the dataset", async () 
   );
 });
 
+it("scales normalized JSONL dataset targets to image pixels and back", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [{ stem: "DJI_0001", image: "DJI_0001.jpg", labels: "DJI_0001.jsonl" }],
+    },
+  ]);
+  mockedApi.saveDatasetLabels.mockResolvedValue(undefined);
+  mockImageEnvironment([{ width: 3840, height: 2160 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        '{"expression": "the giraffes", "targets": [[477, 591, 496, 684]]}',
+        { status: 200 },
+      ),
+    ),
+  );
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Open" }));
+
+  const panel = await screen.findByRole("complementary", { name: "Annotations" });
+  expect(within(panel).getByLabelText("X1")).toHaveValue("1831.68");
+  expect(within(panel).getByLabelText("Y1")).toHaveValue("1276.56");
+  expect(within(panel).getByLabelText("X2")).toHaveValue("1904.64");
+  expect(within(panel).getByLabelText("Y2")).toHaveValue("1477.44");
+  const box = screen.getByTestId("bbox-ann_001");
+  expect(Number(box.getAttribute("x"))).toBeCloseTo(1831.68, 6);
+  expect(Number(box.getAttribute("width"))).toBeCloseTo(72.96, 6);
+
+  // Saving writes the same normalized grid back.
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() =>
+    expect(datasetApi.saveDatasetLabels).toHaveBeenCalledWith(
+      "dji",
+      "DJI_0001.jsonl",
+      expect.stringContaining('"targets":[[477,591,496,684]]'),
+    ),
+  );
+});
+
+it("scales normalized JSONL labels once their image arrives later", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 2000, height: 1000 }]);
+  mockViewportEnvironment();
+  render(<App />);
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(
+      '{"expression": "person", "targets": [[0, 0, 200, 300]]}',
+      "scene.jsonl",
+    ),
+  );
+  // Without an image the normalized grid is kept as-is.
+  expect(await screen.findByLabelText("X2")).toHaveValue("200");
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+
+  await waitFor(() => expect(screen.getByLabelText("X2")).toHaveValue("400"));
+  expect(screen.getByLabelText("Y2")).toHaveValue("300");
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("width", "400");
+  expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("height", "300");
+});
+
 it("uploads image and label pairs into a dataset", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);
