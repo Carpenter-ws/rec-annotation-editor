@@ -465,7 +465,8 @@ export function DatasetDialog({
                             // An image alone can be opened and annotated; the
                             // labels file is created on the first save.
                             const ready = Boolean(item.image);
-                            const hasLabels = Boolean(item.labels);
+                            const complete =
+                              item.image !== null && item.labels !== null;
                             return (
                               <li key={item.stem} data-item-stem={item.stem}>
                                 <span className="dataset-item-stem">
@@ -473,12 +474,12 @@ export function DatasetDialog({
                                 </span>
                                 <span
                                   className={
-                                    hasLabels
+                                    complete
                                       ? "dataset-item-state is-ready"
                                       : "dataset-item-state"
                                   }
                                 >
-                                  {hasLabels
+                                  {item.image && item.labels
                                     ? "image + labels"
                                     : item.image
                                       ? "labels pending"

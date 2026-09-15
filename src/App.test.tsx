@@ -4423,6 +4423,49 @@ it("re-enters the imported item on the canvas after Confirm import", async () =>
   expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
 });
 
+it("labels the half that is missing and only gates Open on the image", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        { stem: "a", image: "a.jpg", labels: "a.txt" },
+        { stem: "b", image: null, labels: "b.txt" },
+        { stem: "c", image: "c.jpg", labels: null },
+      ],
+    },
+  ]);
+  await renderApp();
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+
+  const labelsOnly = dialog.querySelector<HTMLElement>('[data-item-stem="b"]')!;
+  expect(labelsOnly).toHaveTextContent("image pending");
+  expect(
+    within(labelsOnly).getByRole("button", { name: "Open" }),
+  ).toBeDisabled();
+  expect(
+    within(labelsOnly).getByRole("button", { name: "Open" }),
+  ).toHaveAttribute("title", "Add the image first — labels are optional");
+
+  const imageOnly = dialog.querySelector<HTMLElement>('[data-item-stem="c"]')!;
+  expect(imageOnly).toHaveTextContent("labels pending");
+  expect(
+    within(imageOnly).getByRole("button", { name: "Open" }),
+  ).toBeEnabled();
+
+  const complete = dialog.querySelector<HTMLElement>('[data-item-stem="a"]')!;
+  expect(complete).toHaveTextContent("image + labels");
+
+  // Only items that have an image count as openable.
+  expect(dialog).toHaveTextContent("2 of 3 item(s) ready to open");
+});
+
 it("accepts images and labels in separate import passes", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);

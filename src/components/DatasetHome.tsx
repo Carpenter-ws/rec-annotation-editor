@@ -150,8 +150,10 @@ export function DatasetHome({
               const withImages = dataset.items.filter(
                 (item) => item.image !== null,
               );
+              // Counted independently: a dataset can hold labels whose image is
+              // still missing, and only items with an image can be opened.
               const withLabels = dataset.items.filter(
-                (item) => item.image !== null && item.labels !== null,
+                (item) => item.labels !== null,
               ).length;
               const first = withImages[0] ?? null;
               const previews = withImages.slice(0, PREVIEW_LIMIT);

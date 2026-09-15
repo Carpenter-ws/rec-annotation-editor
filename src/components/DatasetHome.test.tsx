@@ -50,8 +50,9 @@ it("lists every stored dataset with its counts and previews", async () => {
   const card = await screen.findByTestId("dataset-card-dji");
   expect(within(card).getByRole("heading", { name: "dji" })).toBeVisible();
   expect(card).toHaveTextContent("3 items");
-  expect(card).toHaveTextContent("1 with labels");
   expect(card).toHaveTextContent("2 with images");
+  // `c` has labels but no image, so the two counts are independent.
+  expect(card).toHaveTextContent("2 with labels");
 
   const previews = [...card.querySelectorAll<HTMLImageElement>("img")];
   expect(previews.map((image) => image.getAttribute("src"))).toEqual([
