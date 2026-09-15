@@ -1,6 +1,8 @@
 import { useRef, useState, type ChangeEvent, type JSX } from "react";
 
 export interface ToolbarProps {
+  /** Back to the dataset home. */
+  onHome: () => void;
   imageName: string | null;
   labelFileName: string | null;
   dirty: boolean;
@@ -40,6 +42,7 @@ export interface ToolbarProps {
 }
 
 export function Toolbar({
+  onHome,
   imageName,
   labelFileName,
   dirty,
@@ -88,6 +91,9 @@ export function Toolbar({
     <header className="toolbar">
       <h1>REC Annotation Editor</h1>
       <div className="toolbar-files">
+        <button type="button" aria-label="Home" onClick={onHome}>
+          Home
+        </button>
         <button type="button" onClick={() => imageInputRef.current?.click()}>
           Open image
         </button>

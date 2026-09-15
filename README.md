@@ -26,6 +26,23 @@ REC_EDITOR_HOST=127.0.0.1 REC_EDITOR_PORT=8080 ./start.sh
 On Windows, run the script from Git Bash/WSL, or start the dev server directly:
 `npm ci --cache .npm-cache && npm run dev`.
 
+## Home page (imported datasets)
+
+The editor opens on the dataset home, which is where everything you imported
+lives:
+
+- one card per dataset in the project's `datasets/` folder, with up to three
+  image previews and a summary (`76 items · 54 with labels · 68 with images`);
+- **Open** loads the first item that has an image straight into the canvas —
+  labels or not (an image-only item opens as an empty document);
+- **Manage files** opens the file manager already expanded on that dataset, for
+  adding or replacing images and label files;
+- **Delete** removes the dataset and its files from disk after a confirmation;
+- **New dataset / Create dataset** starts a new empty group at the top of the
+  page;
+- **Open files without a dataset** goes straight to the editor for a one-off
+  image + label pair; **Home** in the toolbar brings you back at any time.
+
 ## Workflow
 
 1. **Open image** — pick a local image (PNG/JPEG/WebP/SVG/…).

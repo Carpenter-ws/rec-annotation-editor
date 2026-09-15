@@ -33,6 +33,19 @@ vi.mock("./app/datasetApi", async (importOriginal) => {
 const exampleFixture = (name: string) =>
   path.resolve(process.cwd(), "public/examples", name);
 
+/**
+ * The dataset home is the landing page, so tests enter the editor the same way
+ * a user does: through "Open files without a dataset".
+ */
+async function renderApp() {
+  const view = render(<App />);
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("button", { name: "Open files without a dataset" }),
+  );
+  return view;
+}
+
 function mockNarrowLayout(matches: boolean): void {
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches,
@@ -252,8 +265,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("renders the provider-backed REC editor shell and semantic regions", () => {
-  render(<App />);
+it("renders the provider-backed REC editor shell and semantic regions", async () => {
+  await renderApp();
 
   expect(
     screen.getByRole("heading", { name: "REC Annotation Editor" }),
@@ -273,7 +286,7 @@ it("enters Add Box mode from the toolbar after an image loads", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -295,7 +308,7 @@ it("opens a focused new-annotation dialog after drawing a box", async () => {
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -339,7 +352,7 @@ it("rejects an empty trimmed expression in the new-annotation dialog", async () 
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -385,7 +398,7 @@ it("imports, edits, saves, and exports JSONL label files", async () => {
   mockImageEnvironment([{ width: 1000, height: 800 }]);
   mockViewportEnvironment();
   const { blobs, click } = mockDownloadEnvironment();
-  render(<App />);
+  await renderApp();
 
   const jsonl = [
     '{"expression": "the red-and-white boats", "level": "L1", "targets": [[10, 20, 110, 120], [200, 210, 300, 310]]}',
@@ -448,7 +461,7 @@ it("adds and selects a trimmed original-coordinate annotation without moving the
   mockImageEnvironment([{ width: 1000, height: 1000 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -534,7 +547,7 @@ it("uses the reducer next annotation number after importing annotations", async 
   mockImageEnvironment([{ width: 1000, height: 1000 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -594,7 +607,7 @@ it("discards a new annotation draft with Cancel", async () => {
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -650,7 +663,7 @@ it.each(["dialog", "background"] as const)(
     mockImageEnvironment([{ width: 400, height: 300 }]);
     mockViewportEnvironment();
     mockPointerEnvironment();
-    render(<App />);
+    await renderApp();
 
     await user.upload(
       screen.getByLabelText("Open image"),
@@ -716,7 +729,7 @@ it.each(["image", "labels"] as const)(
     const pendingLabels = deferredTextFile("replacement.txt");
     mockViewportEnvironment();
     mockPointerEnvironment();
-    render(<App />);
+    await renderApp();
 
     const imageInput = screen.getByLabelText("Open image");
     await user.upload(
@@ -803,7 +816,7 @@ it("wires centered zoom controls to the viewport and status bar", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 1920, height: 1080 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -844,7 +857,7 @@ it("fits a replacement image even after manual zoom", async () => {
     { width: 400, height: 400 },
   ]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
   const imageInput = screen.getByLabelText("Open image");
 
   await user.upload(
@@ -869,8 +882,8 @@ it("fits a replacement image even after manual zoom", async () => {
   );
 });
 
-it("keeps drag guidance across descendants and clears it on exit or drop", () => {
-  render(<App />);
+it("keeps drag guidance across descendants and clears it on exit or drop", async () => {
+  await renderApp();
   const workspace = screen.getByRole("region", { name: "Image workspace" });
   const child = workspace.querySelector("p");
   expect(child).not.toBeNull();
@@ -892,7 +905,7 @@ it("keeps drag guidance across descendants and clears it on exit or drop", () =>
 
 it("loads duplicate free-text annotations and shows their count", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
   const labels = textFile(
     "0 0 10 10 person 0\n20 20 50 60 the person beside the car 0",
   );
@@ -906,7 +919,7 @@ it("loads duplicate free-text annotations and shows their count", async () => {
 
 it("lists label-only imports but disables bbox editing without image bounds", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -928,7 +941,7 @@ it("centers the viewport on the exact annotation clicked in the panel", async ()
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -974,7 +987,7 @@ it("highlights and scrolls the exact card selected from a duplicate-label bbox",
   mockViewportEnvironment();
 
   try {
-    render(<App />);
+    await renderApp();
     await user.upload(
       screen.getByLabelText("Open image"),
       new File(["pixels"], "scene.png", { type: "image/png" }),
@@ -1018,7 +1031,7 @@ it("separates a focused expression edit, canvas move, and later expression edit 
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment(400, 300);
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -1136,7 +1149,7 @@ it("preserves a focused numeric draft through a canvas move and commits it after
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment(400, 300);
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -1234,7 +1247,7 @@ it("preserves a focused numeric draft through a canvas move and commits it after
 it("reloads identical labels to establish a fresh document baseline", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
   const labels = textFile("0 0 10 10 person 0", "same.txt");
   const labelInput = screen.getByLabelText("Open labels");
 
@@ -1257,7 +1270,7 @@ it("reloads identical labels to establish a fresh document baseline", async () =
 
 it("keeps the current document when a new file contains invalid lines", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
   const labelInput = screen.getByLabelText("Open labels");
 
   await user.upload(labelInput, textFile("0 0 10 10 person 0", "valid.txt"));
@@ -1287,7 +1300,7 @@ it("keeps the current document when a new file contains invalid lines", async ()
 });
 
 it("loads the first recognized dropped file and reports extras explicitly", async () => {
-  render(<App />);
+  await renderApp();
   const labels = textFile("0 0 10 10 first label 0", "first.txt");
   const extraLabels = textFile("0 0 10 10 ignored 0", "extra.TXT");
   const archive = new File(["zip"], "scene.zip", {
@@ -1310,7 +1323,7 @@ it("loads the first recognized dropped file and reports extras explicitly", asyn
 it("clamps labels against an existing image and announces the count", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -1332,7 +1345,7 @@ it("clamps labels against an existing image and announces the count", async () =
 it("rejects every new label when one box is wholly outside the current image", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -1365,7 +1378,7 @@ it("clamps labels loaded before an image as one successful UI operation", async 
   const { revokeObjectURL } = mockImageEnvironment([
     { width: 100, height: 80 },
   ]);
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -1391,7 +1404,7 @@ it("rejects an image that would collapse a pending box and revokes only its URL"
   const { revokeObjectURL } = mockImageEnvironment([
     { width: 100, height: 80 },
   ]);
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -1419,7 +1432,7 @@ it("keeps the old image when a replacement cannot decode", async () => {
     { width: 100, height: 80 },
     "error",
   ]);
-  render(<App />);
+  await renderApp();
   const imageInput = screen.getByLabelText("Open image");
 
   await user.upload(
@@ -1447,7 +1460,7 @@ it("revokes the previous image URL only after a replacement succeeds", async () 
     { width: 100, height: 80 },
     { width: 200, height: 160 },
   ]);
-  render(<App />);
+  await renderApp();
   const imageInput = screen.getByLabelText("Open image");
 
   await user.upload(
@@ -1473,7 +1486,7 @@ it("lets a newer image request supersede delayed outside labels", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   const delayedLabels = deferredTextFile("outside.txt");
-  render(<App />);
+  await renderApp();
 
   await user.upload(screen.getByLabelText("Open labels"), delayedLabels.file);
   await user.upload(
@@ -1495,7 +1508,7 @@ it("lets a newer image request supersede delayed outside labels", async () => {
 it("does not show an error from a stale label request", async () => {
   const user = userEvent.setup();
   const staleLabels = deferredTextFile("stale-invalid.txt");
-  render(<App />);
+  await renderApp();
   const labelInput = screen.getByLabelText("Open labels");
 
   await user.upload(labelInput, staleLabels.file);
@@ -1517,7 +1530,7 @@ it("does not replace the latest labels or notice from a stale clamped request", 
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   const staleLabels = deferredTextFile("stale-clamped.txt");
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -1545,7 +1558,7 @@ it("does not replace the latest labels or notice from a stale clamped request", 
 it("keeps the latest image when two decodes finish in reverse order", async () => {
   const user = userEvent.setup();
   const { images, revokeObjectURL } = mockDeferredImageEnvironment();
-  render(<App />);
+  await renderApp();
   const imageInput = screen.getByLabelText("Open image");
 
   await user.upload(
@@ -1574,7 +1587,7 @@ it("keeps the latest image when two decodes finish in reverse order", async () =
 it("does not show an error from a stale failed image request", async () => {
   const user = userEvent.setup();
   const { images, revokeObjectURL } = mockDeferredImageEnvironment();
-  render(<App />);
+  await renderApp();
   const imageInput = screen.getByLabelText("Open image");
 
   await user.upload(
@@ -1602,7 +1615,7 @@ it("reclaims the accepted image URL when the editor unmounts", async () => {
   const { revokeObjectURL } = mockImageEnvironment([
     { width: 100, height: 80 },
   ]);
-  const { unmount } = render(<App />);
+  const { unmount } = await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -1621,7 +1634,7 @@ it("reclaims a pending image that finishes after unmount without dispatching", a
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
   const { images, revokeObjectURL } = mockDeferredImageEnvironment();
-  const { unmount } = render(<App />);
+  const { unmount } = await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -1641,7 +1654,7 @@ it("reclaims a pending image that finishes after unmount without dispatching", a
 it("commits a same-drop image and labels through one reducer action", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   mockImageEnvironment([{ width: 100, height: 80 }]);
-  render(<App />);
+  await renderApp();
   const image = new File(["pixels"], "scene.png", { type: "image/png" });
   const labels = textFile("10 10 20 20 paired label 0", "scene.txt");
 
@@ -1668,7 +1681,7 @@ it("commits a same-drop image and labels through one reducer action", async () =
 it("saves edited TXT with a deterministic label stem and marks that snapshot clean", async () => {
   const user = userEvent.setup();
   const { blobs, click } = mockDownloadEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -1699,7 +1712,7 @@ it("saves edited TXT with a deterministic label stem and marks that snapshot cle
 it("saves an empty document with the deterministic annotations stem", async () => {
   const user = userEvent.setup();
   const { blobs, click } = mockDownloadEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
@@ -1718,7 +1731,7 @@ it("uses the image stem when saving without an imported label file", async () =>
   const click = vi
     .spyOn(HTMLAnchorElement.prototype, "click")
     .mockImplementation(() => undefined);
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -1746,7 +1759,7 @@ it("retains a valid picker label handle and uses it for Save", async () => {
   };
   const showOpenFilePicker = vi.fn().mockResolvedValue([handle]);
   vi.stubGlobal("showOpenFilePicker", showOpenFilePicker);
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   const expression = await screen.findByRole("textbox", {
@@ -1780,7 +1793,7 @@ it("clears the retained handle after a valid hidden-input label import", async (
     }),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   expect(await screen.findByText("picked label")).toBeVisible();
@@ -1816,7 +1829,7 @@ it("clears the retained handle after a valid dropped label import", async () => 
     }),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   expect(await screen.findByText("picked label")).toBeVisible();
@@ -1854,7 +1867,7 @@ it("preserves the retained handle when a hidden-input label import is invalid", 
     }),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   expect(await screen.findByText("picked label")).toBeVisible();
@@ -1891,7 +1904,7 @@ it("preserves the retained handle when a later open picker is cancelled", async 
     .mockResolvedValueOnce([handle])
     .mockRejectedValueOnce(new DOMException("", "AbortError"));
   vi.stubGlobal("showOpenFilePicker", showOpenFilePicker);
-  render(<App />);
+  await renderApp();
   const openLabels = screen.getByRole("button", { name: "Open labels" });
 
   await user.click(openLabels);
@@ -1926,7 +1939,7 @@ it.each(["hidden input", "drop"] as const)(
       .mockResolvedValueOnce([firstHandle])
       .mockResolvedValueOnce([staleHandle]);
     vi.stubGlobal("showOpenFilePicker", showOpenFilePicker);
-    render(<App />);
+    await renderApp();
     const openLabels = screen.getByRole("button", { name: "Open labels" });
 
     await user.click(openLabels);
@@ -1976,7 +1989,7 @@ it("retains the label handle across an image-only import", async () => {
     }),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   expect(await screen.findByText("picked label")).toBeVisible();
@@ -2020,7 +2033,7 @@ it("preserves the previous handle when a newer picker label is invalid", async (
       .mockResolvedValueOnce([firstHandle])
       .mockResolvedValueOnce([invalidHandle]),
   );
-  render(<App />);
+  await renderApp();
   const openLabels = screen.getByRole("button", { name: "Open labels" });
 
   await user.click(openLabels);
@@ -2045,7 +2058,7 @@ it("surfaces non-cancellation open-picker failures in the existing error UI", as
     "showOpenFilePicker",
     vi.fn().mockRejectedValue(new Error("open picker failed")),
   );
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
 
@@ -2063,7 +2076,7 @@ it("surfaces save failures without marking edited annotations clean", async () =
     createWritable: vi.fn().mockRejectedValue(new Error("disk full")),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   const expression = await screen.findByRole("textbox", {
@@ -2096,7 +2109,7 @@ it("keeps retained-handle AbortError cancellation silent and dirty", async () =>
       .mockRejectedValue(new DOMException("", "AbortError")),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   const expression = await screen.findByRole("textbox", {
@@ -2121,7 +2134,7 @@ it("saves through Save As and marks the written annotation snapshot clean", asyn
     createWritable: vi.fn().mockResolvedValue({ write, close }),
   });
   vi.stubGlobal("showSaveFilePicker", showSaveFilePicker);
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2149,7 +2162,7 @@ it("falls back to a Save As download and marks the downloaded snapshot clean", a
   const user = userEvent.setup();
   const { click } = mockDownloadEnvironment();
   vi.stubGlobal("showSaveFilePicker", undefined);
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2176,7 +2189,7 @@ it("keeps Save As cancellation silent without marking edits clean", async () => 
     "showSaveFilePicker",
     vi.fn().mockRejectedValue(new DOMException("", "AbortError")),
   );
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2202,7 +2215,7 @@ it("surfaces Save As failures without marking edited annotations clean", async (
     "showSaveFilePicker",
     vi.fn().mockRejectedValue(new Error("Save As failed")),
   );
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2238,7 +2251,7 @@ it("does not mark newer edits clean when an older Save finishes", async () => {
     }),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   const expression = await screen.findByRole("textbox", {
@@ -2279,7 +2292,7 @@ it("does not mark newer edits clean when an older Save As finishes", async () =>
       }),
     }),
   );
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2309,7 +2322,7 @@ it("does not mark newer edits clean when an older Save As finishes", async () =>
 
 it("maps editor history and delete shortcuts while protecting editable fields", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2344,7 +2357,7 @@ it("maps editor history and delete shortcuts while protecting editable fields", 
 it("commits a focused expression transaction before shortcut Undo", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2374,7 +2387,7 @@ it("commits a focused numeric draft before shortcut Undo", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2405,7 +2418,7 @@ it("commits a focused expression transaction before shortcut Save", async () => 
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
   const { blobs, click } = mockDownloadEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2438,7 +2451,7 @@ it("commits a focused numeric draft before shortcut Save", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2471,7 +2484,7 @@ it("commits a focused numeric draft before shortcut Save", async () => {
 
 it("exposes disabled-aware Undo and Redo toolbar controls", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
   const undo = screen.getByRole("button", { name: "Undo" });
   const redo = screen.getByRole("button", { name: "Redo" });
 
@@ -2513,7 +2526,7 @@ it("exports exact TXT and JSON snapshots without marking edits clean", async () 
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2586,7 +2599,7 @@ it("installs the beforeunload warning only while annotations are dirty", async (
   mockDownloadEnvironment();
   const addEventListener = vi.spyOn(window, "addEventListener");
   const removeEventListener = vi.spyOn(window, "removeEventListener");
-  render(<App />);
+  await renderApp();
 
   expect(
     addEventListener.mock.calls.some(([type]) => type === "beforeunload"),
@@ -2635,7 +2648,7 @@ it("protects an uncommitted coordinate draft as an unsaved change", async () => 
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
   const addEventListener = vi.spyOn(window, "addEventListener");
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2676,7 +2689,7 @@ it("clears effective dirty when an invalid coordinate draft resets on blur", asy
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2706,7 +2719,7 @@ it("clears the coordinate draft marker when a valid commit is saved", async () =
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
     () => undefined,
   );
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2733,7 +2746,7 @@ it("clears effective dirty when a focused coordinate draft is reverted", async (
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2760,7 +2773,7 @@ it("removes a stale coordinate draft when an import unmounts its card", async ()
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2799,7 +2812,7 @@ it("resets a focused coordinate draft before a same-ID label import", async () =
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2832,7 +2845,7 @@ it("resets a focused coordinate draft before a same-ID label import", async () =
 it("keeps the search field focused while its global Save shortcut runs", async () => {
   const user = userEvent.setup();
   const { blobs, click } = mockDownloadEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -2886,7 +2899,7 @@ it("commits the newest concurrent Save snapshot last and reports it saved", asyn
       .mockResolvedValueOnce(writable(secondClose.promise)),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   const expression = await screen.findByRole("textbox", {
@@ -2915,8 +2928,8 @@ it("commits the newest concurrent Save snapshot last and reports it saved", asyn
   expect(expression).toHaveValue("person first second");
 });
 
-it("exposes named workspace, annotation panel, status and mode controls", () => {
-  render(<App />);
+it("exposes named workspace, annotation panel, status and mode controls", async () => {
+  await renderApp();
 
   expect(screen.getByRole("region", { name: "Image workspace" })).toBeVisible();
   expect(
@@ -2933,7 +2946,7 @@ it("reports clamped imported boxes without losing valid annotations", async () =
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 1920, height: 1080 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2955,7 +2968,7 @@ it("announces notices through a polite live region", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 1920, height: 1080 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -2972,8 +2985,8 @@ it("announces notices through a polite live region", async () => {
   expect(notice).toHaveAttribute("aria-live", "polite");
 });
 
-it("offers deterministic example image and label downloads from the empty state", () => {
-  render(<App />);
+it("offers deterministic example image and label downloads from the empty state", async () => {
+  await renderApp();
 
   expect(screen.getByRole("link", { name: "Example image" })).toHaveAttribute(
     "href",
@@ -3016,7 +3029,7 @@ it("ships 24-line example fixtures that parse inside a 1920x1080 image", async (
 
 it("focuses the error dialog and restores focus to the triggering control", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   const trigger = screen.getByRole("button", { name: /^Save$/ });
   trigger.focus();
@@ -3036,7 +3049,7 @@ it("focuses the error dialog and restores focus to the triggering control", asyn
 
 it("keeps keyboard focus inside the error dialog while it is open", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3078,7 +3091,7 @@ it("shows a recoverable fatal error screen when the editor throws", () => {
 it("collapses the annotation panel into an explicit drawer on narrow screens", async () => {
   const user = userEvent.setup();
   mockNarrowLayout(true);
-  render(<App />);
+  await renderApp();
 
   const toggle = screen.getByRole("button", { name: "Annotations" });
   expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -3092,9 +3105,9 @@ it("collapses the annotation panel into an explicit drawer on narrow screens", a
   ).toBeVisible();
 });
 
-it("keeps the annotation panel open without a drawer toggle on wide screens", () => {
+it("keeps the annotation panel open without a drawer toggle on wide screens", async () => {
   mockNarrowLayout(false);
-  render(<App />);
+  await renderApp();
 
   expect(
     screen.getByRole("complementary", { name: "Annotations" }),
@@ -3106,7 +3119,7 @@ it("keeps the annotation panel open without a drawer toggle on wide screens", ()
 
 it("searches and selects one annotation in a 500-box document", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3131,7 +3144,7 @@ it("keeps the canvas clean until a category is selected", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -3170,7 +3183,7 @@ it("draws the box of a card selected from the panel", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -3194,7 +3207,7 @@ it("draws the box of a card selected from the panel", async () => {
 
 it("groups panel cards by their text label with one subcard per box", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3240,7 +3253,7 @@ it("isolates a category on the canvas when its header is activated", async () =>
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -3280,7 +3293,7 @@ it("resets isolation, selection, and the view with the reset control", async () 
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment(400, 300);
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -3315,7 +3328,7 @@ it("resets isolation, selection, and the view with the reset control", async () 
 
 it("collapses and reopens a category from its header control", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3347,7 +3360,7 @@ it("reopens a collapsed category when its box is selected on the canvas", async 
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -3384,7 +3397,7 @@ it("highlights every box of a category while it is hovered", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -3420,7 +3433,7 @@ it("highlights every box of a category while it is hovered", async () => {
 
 it("moves a box into another category after editing its expression", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3449,7 +3462,7 @@ it("moves a box into another category after editing its expression", async () =>
 
 it("keeps the editing card stable while its new label matches another category", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3481,7 +3494,7 @@ it("keeps the editing card stable while its new label matches another category",
 
 it("collapses and expands every category at once", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3522,7 +3535,7 @@ it("falls back to the classic file dialog when direct file access is blocked", a
       },
     ]);
   vi.stubGlobal("showOpenFilePicker", picker);
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await user.upload(
@@ -3551,7 +3564,7 @@ it("downloads instead of writing when the retained handle is blocked", async () 
       .mockRejectedValue(new DOMException("blocked", "NotAllowedError")),
   };
   vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   expect(await screen.findByDisplayValue("person")).toBeVisible();
@@ -3571,7 +3584,7 @@ it("adds a category box directly from the panel without the dialog", async () =>
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
   mockPointerEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),
@@ -3659,7 +3672,7 @@ it("adds a category box directly from the panel without the dialog", async () =>
 
 it("disables category add buttons until an image provides bounds", async () => {
   const user = userEvent.setup();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3693,7 +3706,7 @@ it("opens a dataset item, edits it, and saves it back to the dataset", async () 
       }),
     ),
   );
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -3757,7 +3770,7 @@ it("scales normalized JSONL dataset targets to image pixels and back", async () 
       ),
     ),
   );
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -3791,7 +3804,7 @@ it("scales normalized JSONL labels once their image arrives later", async () => 
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 2000, height: 1000 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open labels"),
@@ -3870,7 +3883,7 @@ it("switches between dataset items with previous and next", async () => {
   ]);
   mockViewportEnvironment();
   mockDatasetNavigation(threeDatasetItems, threeLabelFiles);
-  render(<App />);
+  await renderApp();
 
   await openDatasetStem(user, "b");
 
@@ -3910,7 +3923,7 @@ it("skips dataset items that are missing an image or a label file", async () => 
     ],
     threeLabelFiles,
   );
-  render(<App />);
+  await renderApp();
 
   await openDatasetStem(user, "a");
   expect(await screen.findByDisplayValue("alpha")).toBeVisible();
@@ -3922,8 +3935,8 @@ it("skips dataset items that are missing an image or a label file", async () => 
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 2");
 });
 
-it("hides dataset navigation when no dataset item is open", () => {
-  render(<App />);
+it("hides dataset navigation when no dataset item is open", async () => {
+  await renderApp();
 
   expect(
     screen.queryByRole("button", { name: "Next image" }),
@@ -3941,7 +3954,7 @@ it("asks before discarding unsaved edits when switching dataset items", async ()
   ]);
   mockViewportEnvironment();
   mockDatasetNavigation(threeDatasetItems, threeLabelFiles);
-  render(<App />);
+  await renderApp();
 
   await openDatasetStem(user, "a");
   const expression = await screen.findByDisplayValue("alpha");
@@ -3984,7 +3997,7 @@ it("moves between dataset items with Alt+Arrow keys", async () => {
   ]);
   mockViewportEnvironment();
   mockDatasetNavigation(threeDatasetItems, threeLabelFiles);
-  render(<App />);
+  await renderApp();
 
   await openDatasetStem(user, "a");
   expect(await screen.findByDisplayValue("alpha")).toBeVisible();
@@ -3994,6 +4007,77 @@ it("moves between dataset items with Alt+Arrow keys", async () => {
 
   fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
   expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+});
+
+it("lands on the dataset home and opens an item from there", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("10 20 110 120 person 0\n", { status: 200 })),
+  );
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [{ stem: "a", image: "a.jpg", labels: "a.txt" }],
+    },
+  ]);
+  render(<App />);
+
+  // The editor is not mounted until a dataset item is opened.
+  const card = await screen.findByTestId("dataset-card-dji");
+  expect(
+    screen.queryByRole("region", { name: "Image workspace" }),
+  ).not.toBeInTheDocument();
+
+  await user.click(within(card).getByRole("button", { name: "Open" }));
+
+  expect(
+    await screen.findByRole("region", { name: "Image workspace" }),
+  ).toBeVisible();
+  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
+});
+
+it("returns to the dataset home from the editor toolbar", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockedApi.listDatasets.mockResolvedValue([
+    { name: "dji", items: [{ stem: "a", image: "a.jpg", labels: null }] },
+  ]);
+  await renderApp();
+
+  await user.click(screen.getByRole("button", { name: "Home" }));
+
+  expect(await screen.findByTestId("dataset-card-dji")).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "Image workspace" }),
+  ).not.toBeInTheDocument();
+});
+
+it("opens the file manager expanded on the dataset chosen at home", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets.mockResolvedValue([
+    { name: "dji", items: [{ stem: "a", image: "a.jpg", labels: null }] },
+    { name: "other", items: [] },
+  ]);
+  render(<App />);
+
+  const card = await screen.findByTestId("dataset-card-dji");
+  await user.click(within(card).getByRole("button", { name: "Manage files" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  expect(
+    within(dialog).getByLabelText("Choose dataset files for dji"),
+  ).toBeInTheDocument();
+  expect(
+    within(dialog).queryByLabelText("Choose dataset files for other"),
+  ).not.toBeInTheDocument();
 });
 
 it("stages chosen files locally and imports them on Confirm import", async () => {
@@ -4012,7 +4096,7 @@ it("stages chosen files locally and imports them on Confirm import", async () =>
     name: "dji",
     items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }],
   });
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4063,7 +4147,8 @@ it("stages chosen files locally and imports them on Confirm import", async () =>
       },
     ]),
   );
-  expect(mockedApi.listDatasets).toHaveBeenCalledTimes(3);
+  // Home + opening the dialog + create + import.
+  expect(mockedApi.listDatasets).toHaveBeenCalledTimes(4);
   expect(within(dialog).queryByLabelText("Staged files")).not.toBeInTheDocument();
 });
 
@@ -4071,7 +4156,7 @@ it("shows a per-file loading state until a staged file is ready", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);
   mockedApi.listDatasets.mockResolvedValue([{ name: "dji", items: [] }]);
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4110,7 +4195,7 @@ it("blocks the import until a failed file is removed", async () => {
   const user = userEvent.setup();
   const mockedApi = vi.mocked(datasetApi);
   mockedApi.listDatasets.mockResolvedValue([{ name: "dji", items: [] }]);
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4162,7 +4247,7 @@ it("discards staged files and their previews when cancelled", async () => {
     { width: 400, height: 300 },
   ]);
   mockedApi.listDatasets.mockResolvedValue([{ name: "dji", items: [] }]);
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4203,7 +4288,7 @@ it("pairs a staged image with labels the dataset already stores", async () => {
     name: "dji",
     items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }],
   });
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4247,7 +4332,7 @@ it("opens an image-only dataset item as an empty canvas and saves new labels", a
     { name: "dji", items: [{ stem: "a", image: "a.jpg", labels: null }] },
   ]);
   mockedApi.saveDatasetLabels.mockResolvedValue(undefined);
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4303,7 +4388,7 @@ it("re-enters the imported item on the canvas after Confirm import", async () =>
     // The refreshed list is what the dialog reads back after the import.
     .mockResolvedValue([summary]);
   mockedApi.uploadDatasetItems.mockResolvedValue(summary);
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4381,7 +4466,7 @@ it("accepts images and labels in separate import passes", async () => {
     if (items.some((entry) => entry.labels)) uploadedLabels = true;
     return serverState()[0]!;
   });
-  render(<App />);
+  await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Datasets" }));
   const dialog = await screen.findByRole("dialog", { name: "Datasets" });
@@ -4456,7 +4541,7 @@ it("leaves Add Box mode once when Escape is pressed before a draft exists", asyn
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 100, height: 80 }]);
   mockViewportEnvironment();
-  render(<App />);
+  await renderApp();
 
   await user.upload(
     screen.getByLabelText("Open image"),

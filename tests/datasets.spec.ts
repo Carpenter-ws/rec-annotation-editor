@@ -5,10 +5,18 @@ import path from "node:path";
 const example = (name: string) =>
   path.resolve(process.cwd(), "public/examples", name);
 
+/** The dataset home is the landing page; the editor is one click away. */
+async function openEditor(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Open files without a dataset" })
+    .click();
+}
+
 test("switches between images of one dataset", async ({ page }) => {
   test.setTimeout(90000);
   await page.request.delete("/api/datasets/e2e-nav");
-  await page.goto("/");
+  await openEditor(page);
   await page.getByRole("button", { name: "Datasets" }).click();
   const dialog = page.getByRole("dialog", { name: "Datasets" });
   await dialog.getByLabel("Dataset name").fill("e2e-nav");
@@ -87,7 +95,7 @@ test("persists a dataset across page reloads", async ({ page }) => {
   test.setTimeout(90000);
   // Remove leftovers from earlier runs so the dataset can be created again.
   await page.request.delete("/api/datasets/e2e-dataset");
-  await page.goto("/");
+  await openEditor(page);
   await page.getByRole("button", { name: "Datasets" }).click();
   const dialog = page.getByRole("dialog", { name: "Datasets" });
   await dialog.getByLabel("Dataset name").fill("e2e-dataset");
@@ -145,26 +153,24 @@ test("persists a dataset across page reloads", async ({ page }) => {
 
   await page.reload();
 
-  await page.getByRole("button", { name: "Datasets" }).click();
-  const dialogAgain = page.getByRole("dialog", { name: "Datasets" });
-  const rowAgain = dialogAgain.locator('[data-dataset-name="e2e-dataset"]');
-  await rowAgain
-    .getByRole("button", { name: "Toggle e2e-dataset items" })
-    .click();
-  await rowAgain.getByRole("button", { name: "Open" }).click();
+  // The landing page lists what was imported and reopens it in one click.
+  const card = page.getByTestId("dataset-card-e2e-dataset");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("1 item");
+  await expect(card).toContainText("1 with labels");
+  await card.getByRole("button", { name: "Open" }).click();
   await expect(cards).toHaveCount(24);
   await expect(
     page.locator('[data-annotation-id="ann_001"]').getByLabel("Expression"),
   ).toHaveValue("person edited for e2e");
   await expect(page.getByLabel("Save status")).toContainText("Saved");
 
-  // Clean up the test dataset.
-  await page.getByRole("button", { name: "Datasets" }).click();
-  await expect(dialogAgain).toBeVisible();
-  await dialogAgain
+  // Back home, delete the dataset from its card.
+  await page.getByRole("button", { name: "Home" }).click();
+  await expect(card).toBeVisible();
+  await card
     .getByRole("button", { name: "Delete dataset e2e-dataset" })
     .click();
-  await expect(
-    dialogAgain.locator('[data-dataset-name="e2e-dataset"]'),
-  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Delete dataset", exact: true }).click();
+  await expect(card).toHaveCount(0);
 });

@@ -9,6 +9,10 @@ test("edits a complete REC document without coordinate drift", async ({
   page,
 }) => {
   await page.goto("/");
+  // The dataset home is the landing page; this flow works on local files.
+  await page
+    .getByRole("button", { name: "Open files without a dataset" })
+    .click();
   await page
     .getByLabel("Open image")
     .setInputFiles(example("rec-aerial-scene.svg"));

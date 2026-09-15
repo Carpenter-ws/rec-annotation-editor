@@ -36,6 +36,8 @@ const ITEM_STATE_LABEL: Record<StagedItem["state"], string> = {
 
 export interface DatasetDialogProps {
   open: boolean;
+  /** Dataset to expand as soon as the dialog opens. */
+  initialExpandedName?: string | null;
   onClose: () => void;
   /** `items` carries the whole dataset so the editor can navigate siblings. */
   onOpenItem: (
@@ -47,6 +49,7 @@ export interface DatasetDialogProps {
 
 export function DatasetDialog({
   open,
+  initialExpandedName = null,
   onClose,
   onOpenItem,
 }: DatasetDialogProps): JSX.Element | null {
@@ -105,13 +108,13 @@ export function DatasetDialog({
 
   useEffect(() => {
     if (!open) return;
-    setExpandedName(null);
+    setExpandedName(initialExpandedName);
     setError(null);
     setSummary(null);
     setNewName("");
     clearStaged();
     void refresh();
-  }, [open, refresh, clearStaged]);
+  }, [open, initialExpandedName, refresh, clearStaged]);
 
   // One row per item: staged halves are paired with what the dataset already
   // stores, so a lone image only reads as "missing labels" when nothing is

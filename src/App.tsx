@@ -33,6 +33,7 @@ import { useUnsavedWarning } from "./app/useUnsavedWarning";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DatasetDialog } from "./components/DatasetDialog";
+import { DatasetHome } from "./components/DatasetHome";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
 import { AnnotationPanel } from "./components/AnnotationPanel";
 import { NewAnnotationDialog } from "./components/NewAnnotationDialog";
@@ -198,6 +199,11 @@ function EditorWorkspace(): JSX.Element {
   const draftLabelRef = useRef(draftLabel);
   draftLabelRef.current = draftLabel;
   const [datasetDialogOpen, setDatasetDialogOpen] = useState(false);
+  /** Dataset the file manager should expand when it opens. */
+  const [managedDataset, setManagedDataset] = useState<string | null>(null);
+  /** The editor opens on the dataset home so imports are one click away. */
+  const [view, setView] = useState<"home" | "editor">("home");
+  const [homeRefreshToken, setHomeRefreshToken] = useState(0);
   const [datasetView, setDatasetView] = useState<DatasetView | null>(null);
   /** Mirrors `datasetView` for callbacks that must not wait for a render. */
   const datasetViewRef = useRef<DatasetView | null>(null);
@@ -393,14 +399,15 @@ function EditorWorkspace(): JSX.Element {
         // the matching label file next to the image.
         const labelFileName =
           labelsFile ?? `${item.stem}${preferredLabelExtension(siblings)}`;
-        const view: DatasetView = {
+        const datasetViewValue: DatasetView = {
           dataset: datasetName,
           stem: item.stem,
           labelsFile: labelFileName,
           items: siblings.length > 0 ? siblings : [item],
         };
-        datasetViewRef.current = view;
-        setDatasetView(view);
+        datasetViewRef.current = datasetViewValue;
+        setDatasetView(datasetViewValue);
+        setView("editor");
         dispatch({
           type: "COMMIT_IMPORT",
           image,
@@ -469,6 +476,7 @@ function EditorWorkspace(): JSX.Element {
     requestedGeneration?: number,
   ): Promise<void> => {
     if (files.image || files.labels) {
+      setView("editor");
       const activeElement = document.activeElement;
       if (
         isEditableTarget(activeElement) &&
@@ -933,7 +941,25 @@ function EditorWorkspace(): JSX.Element {
 
   return (
     <div className="app-shell">
+      {view === "home" ? (
+        <DatasetHome
+          refreshToken={homeRefreshToken}
+          onOpenEditor={() => setView("editor")}
+          onOpenItem={(datasetName, item, items) =>
+            void openDatasetItem(datasetName, item, items)
+          }
+          onManage={(datasetName) => {
+            setManagedDataset(datasetName);
+            setDatasetDialogOpen(true);
+          }}
+        />
+      ) : (
+        <>
       <Toolbar
+        onHome={() => {
+          setHomeRefreshToken((token) => token + 1);
+          setView("home");
+        }}
         imageName={state.image?.name ?? null}
         labelFileName={state.labelFileName}
         dirty={effectiveDirty}
@@ -1077,6 +1103,8 @@ function EditorWorkspace(): JSX.Element {
         notice={notice}
         scale={zoomScale}
       />
+        </>
+      )}
       <ErrorDialog
         title={errorReport?.title ?? "Import error"}
         issues={errorReport?.issues ?? []}
@@ -1094,7 +1122,11 @@ function EditorWorkspace(): JSX.Element {
       ) : null}
       <DatasetDialog
         open={datasetDialogOpen}
-        onClose={() => setDatasetDialogOpen(false)}
+        initialExpandedName={managedDataset}
+        onClose={() => {
+          setDatasetDialogOpen(false);
+          setManagedDataset(null);
+        }}
         onOpenItem={(datasetName, item, items) =>
           void openDatasetItem(datasetName, item, items)
         }
