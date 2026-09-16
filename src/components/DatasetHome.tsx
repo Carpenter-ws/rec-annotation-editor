@@ -161,10 +161,28 @@ export function DatasetHome({
               return (
                 <li
                   key={dataset.name}
-                  className="dataset-card"
+                  className={first ? "dataset-card" : "dataset-card is-empty"}
                   data-dataset-card={dataset.name}
                   data-testid={`dataset-card-${dataset.name}`}
                 >
+                  {/* The whole card opens the dataset; secondary actions sit
+                      above this overlay. */}
+                  <button
+                    type="button"
+                    className="dataset-card-open"
+                    aria-label={`Open dataset ${dataset.name}`}
+                    disabled={first === null}
+                    title={
+                      first === null
+                        ? "Add an image to this dataset first"
+                        : `Open ${first.stem}`
+                    }
+                    onClick={() => {
+                      if (first) {
+                        onOpenItem(dataset.name, first, dataset.items);
+                      }
+                    }}
+                  />
                   <div className="dataset-card-previews">
                     {previews.length > 0 ? (
                       previews.map((item) => (
@@ -180,33 +198,22 @@ export function DatasetHome({
                         No images yet
                       </span>
                     )}
+                    <h3 className="dataset-card-name">{dataset.name}</h3>
+                    {first ? (
+                      <span className="dataset-card-cta" aria-hidden="true">
+                        Open →
+                      </span>
+                    ) : null}
                   </div>
                   <div className="dataset-card-body">
-                    <h3>{dataset.name}</h3>
                     <p
                       className="dataset-card-meta"
                       data-testid={`dataset-card-meta-${dataset.name}`}
                     >
-                      {countLabel(total, "item")} · {withLabels} with labels ·{" "}
-                      {withImages.length} with images
+                      {countLabel(total, "item")} · {withImages.length} with
+                      images · {withLabels} with labels
                     </p>
                     <div className="dataset-card-actions">
-                      <button
-                        type="button"
-                        disabled={first === null}
-                        title={
-                          first === null
-                            ? "Add an image to this dataset first"
-                            : undefined
-                        }
-                        onClick={() => {
-                          if (first) {
-                            onOpenItem(dataset.name, first, dataset.items);
-                          }
-                        }}
-                      >
-                        Open
-                      </button>
                       <button
                         type="button"
                         onClick={() => onManage(dataset.name)}

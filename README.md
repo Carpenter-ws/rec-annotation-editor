@@ -32,9 +32,11 @@ The editor opens on the dataset home, which is where everything you imported
 lives:
 
 - one card per dataset in the project's `datasets/` folder, with up to three
-  image previews and a summary (`76 items · 54 with labels · 68 with images`);
-- **Open** loads the first item that has an image straight into the canvas —
-  labels or not (an image-only item opens as an empty document);
+  image previews and a summary (`76 items · 68 with images · 62 with labels`);
+- **clicking anywhere on a card** opens the dataset: the first item with an
+  image lands on the canvas, labels or not (an image-only item opens as an
+  empty document). A card whose dataset holds no image at all is not clickable
+  and says so; the hover badge shows `Open →`;
 - **Manage files** opens the file manager already expanded on that dataset, for
   adding or replacing images and label files;
 - **Delete** removes the dataset and its files from disk after a confirmation;
@@ -138,12 +140,14 @@ backend):
   to be re-uploaded next session. Edits are stored back into the dataset with
   **Save**.
 - **‹ Previous / Next ›** — once an item is open, the toolbar switches to the
-  neighbouring image of the same dataset and shows the position (`3 / 12`).
-  Items missing an image or a label file are skipped. Keyboard equivalents are
-  `Alt + ←` / `Alt + →`. **Save** always writes back to the labels file of the
-  item shown in the toolbar. Switching with unsaved edits asks first
-  (**Keep editing** / **Discard and switch**) — edits are never dropped
-  silently.
+  neighbouring image of the same dataset and shows the position (`48 / 68`).
+  Any item **with an image** is part of that sequence, including images whose
+  label file has not been imported yet — they open as an empty document and
+  **Save** creates their label file. Only items without an image are skipped.
+  Keyboard equivalents are `Alt + ←` / `Alt + →`. **Save** always writes back
+  to the labels file of the item shown in the toolbar. Switching with unsaved
+  edits asks first (**Keep editing** / **Discard and switch**) — edits are never
+  dropped silently.
 - Once imported, items, files, and edits stay on disk.
 - Delete items or whole datasets from the same dialog.
 

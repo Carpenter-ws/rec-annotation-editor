@@ -61,26 +61,44 @@ it("lists every stored dataset with its counts and previews", async () => {
   ]);
   expect(previews[0]).toHaveAttribute("loading", "lazy");
 
-  // Labels-only datasets are still listed, just without a preview.
+  // Labels-only datasets are still listed, just without a preview and with
+  // nothing to open.
   const emptyCard = screen.getByTestId("dataset-card-empty");
   expect(emptyCard).toHaveTextContent("No images yet");
   expect(
-    within(emptyCard).getByRole("button", { name: "Open" }),
+    within(emptyCard).getByRole("button", { name: "Open dataset empty" }),
   ).toBeDisabled();
 });
 
-it("opens the first item that has an image", async () => {
+it("opens the first item that has an image from the card itself", async () => {
   const user = userEvent.setup();
   const props = renderHome();
 
   const card = await screen.findByTestId("dataset-card-dji");
-  await user.click(within(card).getByRole("button", { name: "Open" }));
+  // The stretched hit area covers the whole card, so there is no Open button.
+  expect(
+    within(card).queryByRole("button", { name: "Open" }),
+  ).not.toBeInTheDocument();
+  await user.click(
+    within(card).getByRole("button", { name: "Open dataset dji" }),
+  );
 
   expect(props.onOpenItem).toHaveBeenCalledWith(
     "dji",
     { stem: "a", image: "a.jpg", labels: "a.jsonl" },
     datasets[0]!.items,
   );
+});
+
+it("keeps the secondary actions from opening the dataset", async () => {
+  const user = userEvent.setup();
+  const props = renderHome();
+
+  const card = await screen.findByTestId("dataset-card-dji");
+  await user.click(within(card).getByRole("button", { name: "Manage files" }));
+
+  expect(props.onManage).toHaveBeenCalledWith("dji");
+  expect(props.onOpenItem).not.toHaveBeenCalled();
 });
 
 it("hands the dataset over for file management", async () => {

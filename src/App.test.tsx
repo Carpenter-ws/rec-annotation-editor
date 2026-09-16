@@ -3908,31 +3908,48 @@ it("switches between dataset items with previous and next", async () => {
   expect(screen.getByRole("button", { name: "Previous image" })).toBeDisabled();
 });
 
-it("skips dataset items that are missing an image or a label file", async () => {
+it("steps through dataset items that have no labels", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([
     { width: 400, height: 300 },
     { width: 400, height: 300 },
+    { width: 400, height: 300 },
   ]);
   mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("10 20 110 120 person 0\n", { status: 200 })),
+  );
   mockDatasetNavigation(
     [
-      { stem: "a", image: "a.jpg", labels: "a.jsonl" },
+      { stem: "a", image: "a.jpg", labels: "a.txt" },
       { stem: "b", image: "b.jpg", labels: null },
-      { stem: "c", image: "c.jpg", labels: "c.jsonl" },
+      { stem: "c", image: null, labels: "c.txt" },
     ],
-    threeLabelFiles,
+    { "a.txt": "10 20 110 120 person 0\n" },
   );
   await renderApp();
 
   await openDatasetStem(user, "a");
-  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
-  expect(screen.getByLabelText("Dataset position")).toHaveTextContent("1 / 2");
+  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  // `b` has no labels but is still part of the sequence; `c` has no image, so
+  // it is not reachable from the canvas.
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 2");
 
   await user.click(screen.getByRole("button", { name: "Next image" }));
 
-  expect(await screen.findByDisplayValue("gamma")).toBeVisible();
+  expect(await screen.findByLabelText("Open files")).toHaveTextContent("b.jpg");
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 2");
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+  expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next image" })).toBeDisabled();
+  expect(screen.getByTestId("editor-notice")).toHaveTextContent(
+    'No label file yet for "b"',
+  );
+
+  await user.click(screen.getByRole("button", { name: "Previous image" }));
+  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 2");
 });
 
 it("hides dataset navigation when no dataset item is open", async () => {
@@ -4032,7 +4049,10 @@ it("lands on the dataset home and opens an item from there", async () => {
     screen.queryByRole("region", { name: "Image workspace" }),
   ).not.toBeInTheDocument();
 
-  await user.click(within(card).getByRole("button", { name: "Open" }));
+  // Clicking the card itself opens the dataset.
+  await user.click(
+    within(card).getByRole("button", { name: "Open dataset dji" }),
+  );
 
   expect(
     await screen.findByRole("region", { name: "Image workspace" }),

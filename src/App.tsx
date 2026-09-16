@@ -157,6 +157,15 @@ function fileStem(fileName: string): string {
   return fileName.replace(/\.[^./\\]+$/, "");
 }
 
+/**
+ * Items the canvas can show. An image is enough — labels are optional, so an
+ * image without labels is still reachable from the dataset and from the
+ * previous/next navigation.
+ */
+function openableDatasetItems(items: readonly DatasetItem[]): DatasetItem[] {
+  return items.filter((item) => item.image !== null);
+}
+
 /** A new label file follows the convention the dataset already uses. */
 function preferredLabelExtension(items: readonly DatasetItem[]): string {
   return items.some((item) => item.labels?.toLowerCase().endsWith(".jsonl"))
@@ -718,10 +727,7 @@ function EditorWorkspace(): JSX.Element {
     viewportRef.current?.centerAnnotation(id);
   }, [visibleAnnotations]);
   const readyDatasetItems = useMemo(
-    () =>
-      datasetView
-        ? datasetView.items.filter((item) => item.image && item.labels)
-        : [],
+    () => openableDatasetItems(datasetView?.items ?? []),
     [datasetView],
   );
   const datasetNavigation = useMemo<DatasetNavigation | null>(() => {
@@ -750,7 +756,7 @@ function EditorWorkspace(): JSX.Element {
     (direction: -1 | 1) => {
       const view = datasetViewRef.current;
       if (!view) return;
-      const ready = view.items.filter((item) => item.image && item.labels);
+      const ready = openableDatasetItems(view.items);
       const index = ready.findIndex((item) => item.stem === view.stem);
       if (index < 0) return;
       const target = ready[index + direction];
