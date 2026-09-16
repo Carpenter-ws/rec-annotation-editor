@@ -3261,7 +3261,7 @@ it("keeps the canvas clean until a category is selected", async () => {
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
 });
 
-it("keeps every category collapsed until one is picked", async () => {
+it("reveals a category from its arrow while its expression only isolates", async () => {
   const user = userEvent.setup();
   await renderApp();
 
@@ -3279,14 +3279,19 @@ it("keeps every category collapsed until one is picked", async () => {
   expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
   expect(screen.queryByDisplayValue("bicycle")).not.toBeInTheDocument();
 
-  // Picking the expression reveals its boxes.
+  // Clicking the expression itself isolates it on canvas, nothing more: the
+  // arrow to its left stays the only way to unfold the boxes.
   await user.click(screen.getByText("person", { exact: true }));
 
+  expect(personToggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
+
+  await user.click(personToggle);
   expect(personToggle).toHaveAttribute("aria-expanded", "true");
   expect(await screen.findByDisplayValue("person")).toBeVisible();
   expect(screen.queryByDisplayValue("bicycle")).not.toBeInTheDocument();
 
-  // Its arrow collapses it again.
+  // And the arrow folds them away again.
   await user.click(personToggle);
   expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
 });
@@ -3909,12 +3914,17 @@ it("opens a dataset item, edits it, and saves it back to the dataset", async () 
   expect(await screen.findByText("person", { exact: true })).toBeVisible();
   expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
-  // Boxes appear once the expression is picked.
+  // Picking the expression isolates its box on the canvas, while the card that
+  // owns the text stays folded behind the arrow.
   await user.click(screen.getByText("person", { exact: true }));
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
     "x",
     "10",
   );
+  expect(
+    screen.queryByRole("textbox", { name: "Expression" }),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Toggle person boxes" }));
 
   // Edits save back into the dataset through the API.
   const expression = screen.getByRole("textbox", { name: "Expression" });

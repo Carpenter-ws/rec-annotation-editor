@@ -170,15 +170,14 @@ export function AnnotationPanel({
   );
 
   // Activation replaces the hover preview, so clicking a category and clicking
-  // it again really does show and then hide its boxes. Picking a category also
-  // reveals its boxes in the panel.
+  // it again really does show and then hide its boxes. It deliberately leaves
+  // the panel folded: unfolding belongs to the arrow left of the expression.
   const activateGroup = useCallback(
     (group: LabelGroup) => {
       onHighlightLabel?.(null);
       onActivateLabel?.(group.label);
-      ensureExpanded(group.label);
     },
-    [ensureExpanded, onActivateLabel, onHighlightLabel],
+    [onActivateLabel, onHighlightLabel],
   );
 
   const toggleGroup = useCallback(
@@ -304,7 +303,7 @@ export function AnnotationPanel({
                 <button
                   type="button"
                   className="annotation-group-label"
-                  title="Select and highlight this category"
+                  title="Select and highlight this category (use the arrow to unfold its boxes)"
                   onClick={() => activateGroup(group)}
                 >
                   {group.label}

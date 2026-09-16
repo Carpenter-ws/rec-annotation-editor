@@ -474,6 +474,65 @@ it("keeps each card's source ordinal while filtering", async () => {
   expect(screen.queryByText("Annotation 1")).not.toBeInTheDocument();
 });
 
+it("isolates an expression when its name is clicked without unfolding it", async () => {
+  const user = userEvent.setup();
+  const onActivateLabel = vi.fn();
+  const { container } = render(
+    <AnnotationPanel
+      annotations={[
+        annotation,
+        { ...annotation, id: "ann_002", label: "bicycle" },
+      ]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+      onActivateLabel={onActivateLabel}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "person" }));
+
+  expect(onActivateLabel).toHaveBeenCalledWith("person");
+  expect(
+    screen.getByRole("button", { name: "Toggle person boxes" }),
+  ).toHaveAttribute("aria-expanded", "false");
+  expect(
+    container.querySelectorAll("[data-annotation-id]"),
+  ).toHaveLength(0);
+});
+
+it("unfolds a category only from the arrow left of its expression", async () => {
+  const user = userEvent.setup();
+  const { container } = render(
+    <AnnotationPanel
+      annotations={[
+        annotation,
+        { ...annotation, id: "ann_002", label: "bicycle" },
+      ]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+    />,
+  );
+  const toggle = screen.getByRole("button", { name: "Toggle person boxes" });
+  const personCards = () =>
+    container.querySelectorAll(
+      '.annotation-group-card[data-group-label="person"] > [data-annotation-id]',
+    );
+
+  expect(personCards()).toHaveLength(0);
+
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(personCards()).toHaveLength(1);
+
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(personCards()).toHaveLength(0);
+});
+
 it("offers deleting a whole expression from its header", async () => {
   const user = userEvent.setup();
   const onDeleteCategory = vi.fn();

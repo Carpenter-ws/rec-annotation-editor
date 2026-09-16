@@ -59,10 +59,11 @@ lives:
      **full expression** — long ones wrap over as many lines as they need
      instead of being cut off — plus how many boxes share it;
    - **categories start collapsed**, so a document opens as a readable list of
-     expressions. Reveal one with its arrow, by clicking the expression (which
-     also isolates it on the canvas), or with **Expand all** / **Collapse all**;
-     searching shows the matching cards right away, and the category of a
-     selected box always opens itself;
+     expressions. Reveal one with the small arrow left of its text, or with
+     **Expand all** / **Collapse all**; searching shows the matching cards right
+     away, and the category of a selected box always opens itself. Clicking the
+     expression text itself only isolates it on the canvas — it never unfolds
+     the panel, and the blank space right of the text does nothing;
    - **the canvas starts clean**: no boxes are drawn until an expression is
      picked, so a crowded image is readable from the first second;
    - hover a category to **preview** all of its boxes; click a category to
@@ -72,8 +73,10 @@ lives:
      “locate” and resizing work;
    - **Reset** (next to Collapse all) clears the selected category and the
      selection, hides every box, and re-fits the image;
-   - collapse or reopen a category with its arrow, or use **Collapse all /
-     Expand all**; the category of a selected box always reopens;
+   - the arrow is the only expand/collapse target (it sits left of the text, so
+     the hit area never grows past the expression); **Collapse all / Expand
+     all** cover the whole panel, and the category of a selected box always
+     reopens;
    - **Add** on a category header draws a new box of that category: drag a
      rectangle on the image and it joins the category immediately (no dialog);
      keep drawing to add more, press `Esc` to stop;
