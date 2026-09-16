@@ -101,6 +101,33 @@ it("keeps the secondary actions from opening the dataset", async () => {
   expect(props.onOpenItem).not.toHaveBeenCalled();
 });
 
+it("filters datasets by name and sums up the import", async () => {
+  const user = userEvent.setup();
+  renderHome();
+  await screen.findByTestId("dataset-card-dji");
+
+  expect(screen.getByText(/2 datasets · 4 items/)).toBeVisible();
+
+  await user.type(screen.getByLabelText("Search datasets"), "emp");
+
+  expect(screen.queryByTestId("dataset-card-dji")).not.toBeInTheDocument();
+  expect(screen.getByTestId("dataset-card-empty")).toBeVisible();
+  expect(screen.getByText("1 of 2")).toBeVisible();
+});
+
+it("calls out the halves a dataset is still missing", async () => {
+  renderHome();
+
+  const card = await screen.findByTestId("dataset-card-dji");
+  // `b` has no labels, `c` has no image.
+  expect(within(card).getByText("1 without images")).toBeVisible();
+  expect(within(card).getByText("1 without labels")).toBeVisible();
+
+  const emptyCard = screen.getByTestId("dataset-card-empty");
+  expect(within(emptyCard).getByText("1 without images")).toBeVisible();
+  expect(within(emptyCard).getByText("1 without labels")).toBeVisible();
+});
+
 it("hands the dataset over for file management", async () => {
   const user = userEvent.setup();
   const props = renderHome();

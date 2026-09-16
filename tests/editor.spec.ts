@@ -20,6 +20,8 @@ test("edits a complete REC document without coordinate drift", async ({
     .getByLabel("Open labels")
     .setInputFiles(example("rec-aerial-scene.txt"));
 
+  // Expressions are listed collapsed at first; reveal the cards underneath.
+  await page.getByRole("button", { name: "Expand all" }).click();
   const cards = page.locator("[data-annotation-id]");
   await expect(cards).toHaveCount(24);
   await expect(page.getByText("1920 × 1080", { exact: true })).toBeVisible();

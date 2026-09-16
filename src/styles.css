@@ -194,38 +194,90 @@ input,
 .home-shell {
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
   min-height: 100vh;
-  padding: var(--space-lg) var(--space-lg) var(--space-xl);
   overflow-y: auto;
-  background: var(--workspace);
+  color: #111827;
+  background: #eef1f6;
 }
 
-.home-header {
+.home-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-xl);
+  background: rgb(255 255 255 / 92%);
+  border-bottom: 1px solid #dfe4ec;
+  backdrop-filter: blur(8px);
+}
+
+.home-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.home-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  border-radius: 10px;
+}
+
+.home-brand h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+
+.home-tagline {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #5b6779;
+}
+
+.home-main {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: var(--space-lg) var(--space-xl) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.home-intro {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-md);
-  padding-bottom: var(--space-md);
-  border-bottom: 1px solid var(--border);
 }
 
-.home-header h1 {
-  margin: 0 0 var(--space-xs);
-  font-size: 20px;
-  color: #f4f7fa;
-}
-
-.home-hint {
+.home-title {
   margin: 0;
-  font-size: 12px;
-  color: #a9b6c4;
+  font-size: 26px;
+  letter-spacing: -0.01em;
+}
+
+.home-stats {
+  margin: var(--space-xs) 0 0;
+  font-size: 13px;
+  color: #5b6779;
 }
 
 .home-create {
   display: flex;
-  flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-sm);
 }
@@ -235,26 +287,35 @@ input,
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: #a9b6c4;
+  color: #5b6779;
 }
 
-.home-create input {
-  padding: 7px 10px;
+.home-create input,
+.home-filter input {
+  padding: 9px 12px;
   font: inherit;
   font-size: 13px;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  color: #111827;
+  background: #fff;
+  border: 1px solid #d5dbe6;
+  border-radius: 10px;
+}
+
+.home-create input:focus-visible,
+.home-filter input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid rgb(14 165 183 / 35%);
+  outline-offset: 1px;
 }
 
 .home-create button {
-  padding: 7px 12px;
+  padding: 9px 14px;
   font: inherit;
   font-size: 13px;
-  color: var(--text);
-  background: var(--panel-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  color: #fff;
+  background: var(--accent-strong);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
   cursor: pointer;
 }
 
@@ -263,19 +324,93 @@ input,
   cursor: not-allowed;
 }
 
-.home-status {
-  margin: 0;
+.home-ghost {
+  padding: 9px 14px;
+  font: inherit;
   font-size: 13px;
-  color: #a9b6c4;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #d5dbe6;
+  border-radius: 10px;
+  cursor: pointer;
 }
 
-.home-section-title {
-  margin: 0 0 var(--space-sm);
+.home-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.home-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.home-filter input {
+  width: min(320px, 100%);
+}
+
+.home-filter-count {
+  font-size: 12px;
+  color: #5b6779;
+}
+
+.home-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xxl, 56px) var(--space-xl);
+  text-align: center;
+  background: #fff;
+  border: 1px dashed #c9d2e0;
+  border-radius: var(--radius-lg);
+}
+
+.home-empty h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.home-empty p {
+  max-width: 46ch;
+  margin: 0;
   font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: #a9b6c4;
-  text-transform: uppercase;
+  line-height: 1.6;
+  color: #5b6779;
+}
+
+.dataset-card.is-skeleton {
+  pointer-events: none;
+}
+
+.skeleton-line {
+  display: block;
+  height: 12px;
+  background: linear-gradient(90deg, #e6eaf1, #f2f5f9, #e6eaf1);
+  border-radius: 999px;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-line.is-short {
+  width: 55%;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line {
+    animation: none;
+  }
 }
 
 .dataset-card-list {
@@ -421,6 +556,28 @@ input,
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.dataset-card-gaps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin: 0;
+}
+
+.dataset-gap {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #6b7280;
+  background: #f1f4f8;
+  border: 1px solid #e2e7ef;
+  border-radius: 999px;
+}
+
+.dataset-gap.is-error {
+  color: #b45309;
+  background: #fff7ed;
+  border-color: #fed7aa;
 }
 
 .dataset-card-actions {
@@ -672,7 +829,7 @@ input,
   top: calc(-1 * var(--space-md));
   z-index: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-xs);
   margin-top: var(--space-xs);
   padding: 6px 8px;
@@ -696,13 +853,15 @@ input,
   flex: 1;
   min-width: 0;
   padding: 2px 4px;
-  overflow: hidden;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.4;
   color: var(--text);
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Long expressions are the whole point of REC, so wrap them instead of
+     truncating with an ellipsis. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   background: none;
   border: none;
   border-radius: var(--space-xs);
@@ -717,6 +876,7 @@ input,
 .annotation-group-count {
   flex-shrink: 0;
   min-width: 22px;
+  margin-top: 2px;
   padding: 1px 6px;
   font-size: 11px;
   color: var(--text-muted);
@@ -724,6 +884,11 @@ input,
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 999px;
+}
+
+.annotation-group-toggle,
+.annotation-group-add {
+  margin-top: 2px;
 }
 
 .annotation-group-add {

@@ -45,6 +45,13 @@ function ReducerPanelHarness() {
   );
 }
 
+/** Categories start collapsed, so panel tests reveal the cards they drive. */
+async function showAllCards(): Promise<void> {
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "Expand all" }));
+}
+
 function renderCard(dispatch = vi.fn()) {
   render(
     <AnnotationCard
@@ -484,6 +491,7 @@ it("selects and locates the exact clicked annotation ID", async () => {
       onLocate={onLocate}
     />,
   );
+  await showAllCards();
 
   await user.click(
     container.querySelector<HTMLElement>('[data-annotation-id="duplicate/id"]')!,
@@ -536,6 +544,7 @@ it("deletes the exact card without bubbling into selection or locate", async () 
       onLocate={onLocate}
     />,
   );
+  await showAllCards();
 
   await user.click(
     screen.getAllByRole("button", { name: "Delete annotation" })[1]!,
@@ -560,6 +569,7 @@ it("selects card fields without locating them through click bubbling", async () 
       onLocate={onLocate}
     />,
   );
+  await showAllCards();
 
   await user.click(
     screen.getByRole("searchbox", { name: "Search annotations" }),
@@ -585,7 +595,7 @@ it("selects card fields without locating them through click bubbling", async () 
   expect(onLocate).not.toHaveBeenCalled();
 });
 
-it("scrolls the exact selected special-character ID without CSS.escape", () => {
+it("scrolls the exact selected special-character ID without CSS.escape", async () => {
   const specialId = 'ann_\"]#special\\id';
   const scrollIntoView = vi.fn();
   const originalScrollIntoView = Object.getOwnPropertyDescriptor(
@@ -610,6 +620,7 @@ it("scrolls the exact selected special-character ID without CSS.escape", () => {
       onLocate: vi.fn(),
     };
     const { container, rerender } = render(<AnnotationPanel {...props} />);
+    await showAllCards();
     const selectedCard = [
       ...container.querySelectorAll<HTMLElement>("[data-annotation-id]"),
     ].find((element) => element.dataset.annotationId === specialId);

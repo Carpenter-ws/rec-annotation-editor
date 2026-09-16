@@ -56,7 +56,9 @@ export function AnnotationPanel({
   const [activeExpressionId, setActiveExpressionId] = useState<string | null>(
     null,
   );
-  const [collapsedLabels, setCollapsedLabels] = useState<ReadonlySet<string>>(
+  // Categories start collapsed: the panel shows the expressions first, and a
+  // category reveals its boxes only when it is expanded.
+  const [expandedLabels, setExpandedLabels] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const panelRef = useRef<HTMLDivElement>(null);
@@ -127,10 +129,10 @@ export function AnnotationPanel({
   );
 
   const ensureExpanded = useCallback((label: string) => {
-    setCollapsedLabels((current) => {
-      if (!current.has(label)) return current;
+    setExpandedLabels((current) => {
+      if (current.has(label)) return current;
       const next = new Set(current);
-      next.delete(label);
+      next.add(label);
       return next;
     });
   }, []);
@@ -165,13 +167,15 @@ export function AnnotationPanel({
   );
 
   // Activation replaces the hover preview, so clicking a category and clicking
-  // it again really does show and then hide its boxes.
+  // it again really does show and then hide its boxes. Picking a category also
+  // reveals its boxes in the panel.
   const activateGroup = useCallback(
     (group: LabelGroup) => {
       onHighlightLabel?.(null);
       onActivateLabel?.(group.label);
+      ensureExpanded(group.label);
     },
-    [onActivateLabel, onHighlightLabel],
+    [ensureExpanded, onActivateLabel, onHighlightLabel],
   );
 
   const toggleGroup = useCallback(
@@ -179,11 +183,12 @@ export function AnnotationPanel({
       const keepsEditingCard = group.entries.some(
         ({ annotation }) => annotation.id === activeExpressionId,
       );
-      setCollapsedLabels((current) => {
-        const isCollapsed = current.has(group.label);
-        if (!isCollapsed && keepsEditingCard) return current;
+      setExpandedLabels((current) => {
+        const isExpanded = current.has(group.label);
+        // Never unmount the card that currently owns the text edit.
+        if (isExpanded && keepsEditingCard) return current;
         const next = new Set(current);
-        if (isCollapsed) next.delete(group.label);
+        if (isExpanded) next.delete(group.label);
         else next.add(group.label);
         return next;
       });
@@ -191,12 +196,12 @@ export function AnnotationPanel({
     [activeExpressionId],
   );
 
-  const allExpanded = collapsedLabels.size === 0;
+  const allExpanded =
+    groups.length > 0 &&
+    groups.every(({ label }) => expandedLabels.has(label));
   const toggleAllGroups = useCallback(() => {
-    setCollapsedLabels(
-      allExpanded
-        ? new Set(groups.map(({ label }) => label))
-        : () => new Set<string>(),
+    setExpandedLabels(
+      allExpanded ? new Set<string>() : new Set(groups.map(({ label }) => label)),
     );
   }, [allExpanded, groups]);
 
@@ -222,7 +227,7 @@ export function AnnotationPanel({
     if (!selectedCard || scrolledForIdRef.current === selectedId) return;
     scrolledForIdRef.current = selectedId;
     selectedCard?.scrollIntoView?.({ block: "nearest" });
-  }, [collapsedLabels, selectedId]);
+  }, [expandedLabels, selectedId]);
 
   return (
     <div ref={panelRef} id="annotation-panel" className="annotation-panel">
@@ -269,7 +274,9 @@ export function AnnotationPanel({
       {visibleGroups.length > 0 ? (
         <div className="annotation-groups">
           {visibleGroups.flatMap(({ group, visibleEntries }) => {
-            const collapsed = collapsedLabels.has(group.label);
+            // While searching, matching categories show their cards right away.
+            const collapsed =
+              normalizedQuery === "" && !expandedLabels.has(group.label);
             const rows: JSX.Element[] = [
               <header
                 key={`header:${group.label}`}

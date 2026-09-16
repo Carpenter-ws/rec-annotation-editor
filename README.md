@@ -33,6 +33,9 @@ lives:
 
 - one card per dataset in the project's `datasets/` folder, with up to three
   image previews and a summary (`76 items · 68 with images · 62 with labels`);
+- a header row totals the whole import (`2 datasets · 183 items · 175 images ·
+  169 label files`), a search box filters the cards by name, and each card
+  badges the halves it is missing (`8 without images`, `14 without labels`);
 - **clicking anywhere on a card** opens the dataset: the first item with an
   image lands on the canvas, labels or not (an image-only item opens as an
   empty document). A card whose dataset holds no image at all is not clickable
@@ -52,8 +55,13 @@ lives:
    the workspace at once, in either order.
 3. Edit on the canvas or in the right-hand panel:
    - the panel groups cards by their text label: each category header shows the
-     expression and how many boxes share it, with every box one level below as
-     its own card (ID, expression, exact coordinates);
+     **full expression** — long ones wrap over as many lines as they need
+     instead of being cut off — plus how many boxes share it;
+   - **categories start collapsed**, so a document opens as a readable list of
+     expressions. Reveal one with its arrow, by clicking the expression (which
+     also isolates it on the canvas), or with **Expand all** / **Collapse all**;
+     searching shows the matching cards right away, and the category of a
+     selected box always opens itself;
    - **the canvas starts clean**: no boxes are drawn until an expression is
      picked, so a crowded image is readable from the first second;
    - hover a category to **preview** all of its boxes; click a category to

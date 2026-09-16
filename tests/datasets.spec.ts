@@ -13,6 +13,27 @@ async function openEditor(page: import("@playwright/test").Page) {
     .click();
 }
 
+/** Categories start collapsed, and paging resets them, so reveal the cards. */
+async function expandCategories(page: import("@playwright/test").Page) {
+  // Wait for the document to finish loading its expressions first; an item
+  // without labels has none, so give up quietly after a moment.
+  await page
+    .getByRole("button", { name: /^Toggle .+ boxes$/ })
+    .first()
+    .waitFor({ timeout: 5000 })
+    .catch(() => undefined);
+  const expand = page.getByRole("button", { name: "Expand all" });
+  if (await expand.count()) await expand.click();
+}
+
+async function stepImage(
+  page: import("@playwright/test").Page,
+  label: "Next image" | "Previous image",
+) {
+  await page.getByRole("button", { name: label }).click();
+  await expandCategories(page);
+}
+
 test("switches between images of one dataset", async ({ page }) => {
   test.setTimeout(90000);
   await page.request.delete("/api/datasets/e2e-nav");
@@ -58,14 +79,15 @@ test("switches between images of one dataset", async ({ page }) => {
   const position = page.getByTestId("dataset-position");
   const firstCard = page.locator('[data-annotation-id="ann_001"]');
   await expect(position).toHaveText("1 / 3");
+  await expandCategories(page);
   await expect(firstCard.getByLabel("Expression")).toHaveValue("person");
 
   // Step to the second item, then back with the toolbar buttons.
-  await page.getByRole("button", { name: "Next image" }).click();
+  await stepImage(page, "Next image");
   await expect(position).toHaveText("2 / 3");
   await expect(firstCard.getByLabel("Expression")).toHaveValue("vehicle");
 
-  await page.getByRole("button", { name: "Previous image" }).click();
+  await stepImage(page, "Previous image");
   await expect(position).toHaveText("1 / 3");
   await expect(page.getByRole("button", { name: "Previous image" })).toBeDisabled();
   await expect(firstCard.getByLabel("Expression")).toHaveValue("person");
@@ -85,6 +107,7 @@ test("switches between images of one dataset", async ({ page }) => {
   await page.getByRole("button", { name: "Next image" }).click();
   await page.getByRole("button", { name: "Discard and switch" }).click();
   await expect(position).toHaveText("2 / 3");
+  await expandCategories(page);
   await firstCard.getByLabel("Expression").fill("vehicle edited for e2e");
   await firstCard.getByLabel("Expression").blur();
   await page.getByRole("button", { name: /^Save$/ }).click();
@@ -93,7 +116,7 @@ test("switches between images of one dataset", async ({ page }) => {
   );
 
   // The image without labels is part of the sequence and opens empty.
-  await page.getByRole("button", { name: "Next image" }).click();
+  await stepImage(page, "Next image");
   await expect(position).toHaveText("3 / 3");
   await expect(page.getByRole("button", { name: "Next image" })).toBeDisabled();
   await expect(page.getByRole("status")).toContainText("0 annotations");
@@ -150,6 +173,7 @@ test("persists a dataset across page reloads", async ({ page }) => {
   ).toHaveText("image + labels");
   await reopened.getByRole("button", { name: "Confirm import" }).click();
   await expect(reopened).not.toBeVisible();
+  await expandCategories(page);
   await expect(cards).toHaveCount(24);
   await expect(page.getByText("1920 × 1080", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Save status")).toContainText("Saved");
@@ -173,6 +197,7 @@ test("persists a dataset across page reloads", async ({ page }) => {
   await expect(card).toContainText("1 with labels");
   // Clicking the card itself (not a dedicated button) opens the dataset.
   await card.click();
+  await expandCategories(page);
   await expect(cards).toHaveCount(24);
   await expect(
     page.locator('[data-annotation-id="ann_001"]').getByLabel("Expression"),

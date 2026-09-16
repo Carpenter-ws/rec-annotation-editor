@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import {
   createDataset,
   datasetImageUrl,
@@ -44,6 +44,7 @@ export function DatasetHome({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
+  const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -97,145 +98,239 @@ export function DatasetHome({
     }
   };
 
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleDatasets = useMemo(
+    () =>
+      normalizedQuery === ""
+        ? datasets
+        : datasets.filter((dataset) =>
+            dataset.name.toLocaleLowerCase().includes(normalizedQuery),
+          ),
+    [datasets, normalizedQuery],
+  );
+
+  const totals = useMemo(() => {
+    let items = 0;
+    let images = 0;
+    let labels = 0;
+    for (const dataset of datasets) {
+      for (const item of dataset.items) {
+        items += 1;
+        if (item.image) images += 1;
+        if (item.labels) labels += 1;
+      }
+    }
+    return { items, images, labels };
+  }, [datasets]);
+
   return (
     <div className="home-shell">
-      <header className="home-header">
-        <div>
-          <h1>REC Annotation Editor</h1>
-          <p className="home-hint">
-            Datasets live in the project's <code>datasets/</code> folder, so
-            everything you imported is still here next time you open the editor.
-          </p>
+      <header className="home-topbar">
+        <div className="home-brand">
+          <span className="home-mark" aria-hidden="true">
+            REC
+          </span>
+          <div>
+            <h1>REC Annotation Editor</h1>
+            <p className="home-tagline">
+              Referring-expression boxes, kept in the project's{" "}
+              <code>datasets/</code> folder.
+            </p>
+          </div>
         </div>
-        <div className="home-create">
-          <label>
-            New dataset
-            <input
-              value={newName}
-              placeholder="Dataset name"
-              aria-label="New dataset name"
-              onChange={(event) => setNewName(event.currentTarget.value)}
-            />
-          </label>
-          <button
-            type="button"
-            disabled={busy || newName.trim().length === 0}
-            onClick={() => void handleCreate()}
-          >
-            Create dataset
-          </button>
-          <button type="button" onClick={onOpenEditor}>
-            Open files without a dataset
-          </button>
-        </div>
+        <button type="button" className="home-ghost" onClick={onOpenEditor}>
+          Open files without a dataset
+        </button>
       </header>
 
-      {error ? <p role="alert">{error}</p> : null}
-      {loading ? <p className="home-status">Loading datasets…</p> : null}
-      {!loading && datasets.length === 0 ? (
-        <p className="home-status">
-          No datasets yet. Create one above, then add images together with their
-          <code> .txt</code>/<code>.jsonl</code> label files.
-        </p>
-      ) : null}
+      <main className="home-main">
+        <div className="home-intro">
+          <div>
+            <h2 className="home-title">Datasets</h2>
+            <p className="home-stats">
+              {countLabel(datasets.length, "dataset")} ·{" "}
+              {countLabel(totals.items, "item")} ·{" "}
+              {countLabel(totals.images, "image")} ·{" "}
+              {countLabel(totals.labels, "label file")}
+            </p>
+          </div>
+          <div className="home-create">
+            <label>
+              New dataset
+              <input
+                value={newName}
+                placeholder="Dataset name"
+                aria-label="New dataset name"
+                onChange={(event) => setNewName(event.currentTarget.value)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy || newName.trim().length === 0}
+              onClick={() => void handleCreate()}
+            >
+              Create dataset
+            </button>
+          </div>
+        </div>
 
-      {datasets.length > 0 ? (
-        <section aria-label="Datasets">
-          <h2 className="home-section-title">
-            {countLabel(datasets.length, "dataset")}
-          </h2>
-          <ul className="dataset-card-list">
-            {datasets.map((dataset) => {
-              const total = dataset.items.length;
-              const withImages = dataset.items.filter(
-                (item) => item.image !== null,
-              );
-              // Counted independently: a dataset can hold labels whose image is
-              // still missing, and only items with an image can be opened.
-              const withLabels = dataset.items.filter(
-                (item) => item.labels !== null,
-              ).length;
-              const first = withImages[0] ?? null;
-              const previews = withImages.slice(0, PREVIEW_LIMIT);
+        {error ? <p role="alert">{error}</p> : null}
 
-              return (
-                <li
-                  key={dataset.name}
-                  className={first ? "dataset-card" : "dataset-card is-empty"}
-                  data-dataset-card={dataset.name}
-                  data-testid={`dataset-card-${dataset.name}`}
-                >
-                  {/* The whole card opens the dataset; secondary actions sit
-                      above this overlay. */}
-                  <button
-                    type="button"
-                    className="dataset-card-open"
-                    aria-label={`Open dataset ${dataset.name}`}
-                    disabled={first === null}
-                    title={
-                      first === null
-                        ? "Add an image to this dataset first"
-                        : `Open ${first.stem}`
-                    }
-                    onClick={() => {
-                      if (first) {
-                        onOpenItem(dataset.name, first, dataset.items);
-                      }
-                    }}
-                  />
-                  <div className="dataset-card-previews">
-                    {previews.length > 0 ? (
-                      previews.map((item) => (
-                        <img
-                          key={item.stem}
-                          src={datasetImageUrl(dataset.name, item.image!)}
-                          alt=""
-                          loading="lazy"
-                        />
-                      ))
-                    ) : (
-                      <span className="dataset-card-placeholder">
-                        No images yet
-                      </span>
-                    )}
-                    <h3 className="dataset-card-name">{dataset.name}</h3>
-                    {first ? (
-                      <span className="dataset-card-cta" aria-hidden="true">
-                        Open →
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="dataset-card-body">
-                    <p
-                      className="dataset-card-meta"
-                      data-testid={`dataset-card-meta-${dataset.name}`}
-                    >
-                      {countLabel(total, "item")} · {withImages.length} with
-                      images · {withLabels} with labels
-                    </p>
-                    <div className="dataset-card-actions">
-                      <button
-                        type="button"
-                        onClick={() => onManage(dataset.name)}
-                      >
-                        Manage files
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete dataset ${dataset.name}`}
-                        disabled={busy}
-                        onClick={() => setPendingDelete(dataset.name)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
+        {datasets.length > 0 ? (
+          <div className="home-filter">
+            <input
+              type="search"
+              value={query}
+              placeholder="Search datasets..."
+              aria-label="Search datasets"
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+            {normalizedQuery !== "" ? (
+              <span className="home-filter-count">
+                {visibleDatasets.length} of {datasets.length}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {loading ? (
+          <ul className="dataset-card-list" aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <li key={index} className="dataset-card is-skeleton">
+                <div className="dataset-card-previews" />
+                <div className="dataset-card-body">
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line is-short" />
+                </div>
+              </li>
+            ))}
           </ul>
-        </section>
-      ) : null}
+        ) : null}
+
+        {!loading && datasets.length === 0 ? (
+          <div className="home-empty">
+            <h3>No datasets yet</h3>
+            <p>
+              Create one above, then add images together with their{" "}
+              <code>.txt</code>/<code>.jsonl</code> label files. Images and
+              labels can arrive in separate batches as long as they share the
+              same name.
+            </p>
+            <button type="button" className="home-ghost" onClick={onOpenEditor}>
+              Annotate a single image instead
+            </button>
+          </div>
+        ) : null}
+
+        {!loading && datasets.length > 0 ? (
+          <section aria-label="Datasets">
+            <ul className="dataset-card-list">
+              {visibleDatasets.map((dataset) => {
+                const total = dataset.items.length;
+                const withImages = dataset.items.filter(
+                  (item) => item.image !== null,
+                );
+                const withLabels = dataset.items.filter(
+                  (item) => item.labels !== null,
+                ).length;
+                const first = withImages[0] ?? null;
+                const previews = withImages.slice(0, PREVIEW_LIMIT);
+                const missingImages = total - withImages.length;
+                const missingLabels = total - withLabels;
+
+                return (
+                  <li
+                    key={dataset.name}
+                    className={first ? "dataset-card" : "dataset-card is-empty"}
+                    data-dataset-card={dataset.name}
+                    data-testid={`dataset-card-${dataset.name}`}
+                  >
+                    {/* The whole card opens the dataset; secondary actions sit
+                        above this overlay. */}
+                    <button
+                      type="button"
+                      className="dataset-card-open"
+                      aria-label={`Open dataset ${dataset.name}`}
+                      disabled={first === null}
+                      title={
+                        first === null
+                          ? "Add an image to this dataset first"
+                          : `Open ${first.stem}`
+                      }
+                      onClick={() => {
+                        if (first) {
+                          onOpenItem(dataset.name, first, dataset.items);
+                        }
+                      }}
+                    />
+                    <div className="dataset-card-previews">
+                      {previews.length > 0 ? (
+                        previews.map((item) => (
+                          <img
+                            key={item.stem}
+                            src={datasetImageUrl(dataset.name, item.image!)}
+                            alt=""
+                            loading="lazy"
+                          />
+                        ))
+                      ) : (
+                        <span className="dataset-card-placeholder">
+                          No images yet
+                        </span>
+                      )}
+                      <h3 className="dataset-card-name">{dataset.name}</h3>
+                      {first ? (
+                        <span className="dataset-card-cta" aria-hidden="true">
+                          Open →
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="dataset-card-body">
+                      <p
+                        className="dataset-card-meta"
+                        data-testid={`dataset-card-meta-${dataset.name}`}
+                      >
+                        {countLabel(total, "item")} · {withImages.length} with
+                        images · {withLabels} with labels
+                      </p>
+                      {missingImages > 0 || missingLabels > 0 ? (
+                        <p className="dataset-card-gaps">
+                          {missingImages > 0 ? (
+                            <span className="dataset-gap is-error">
+                              {missingImages} without images
+                            </span>
+                          ) : null}
+                          {missingLabels > 0 ? (
+                            <span className="dataset-gap">
+                              {missingLabels} without labels
+                            </span>
+                          ) : null}
+                        </p>
+                      ) : null}
+                      <div className="dataset-card-actions">
+                        <button
+                          type="button"
+                          onClick={() => onManage(dataset.name)}
+                        >
+                          Manage files
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete dataset ${dataset.name}`}
+                          disabled={busy}
+                          onClick={() => setPendingDelete(dataset.name)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
+      </main>
 
       {pendingDelete ? (
         <ConfirmDialog

@@ -37,6 +37,45 @@ const exampleFixture = (name: string) =>
  * The dataset home is the landing page, so tests enter the editor the same way
  * a user does: through "Open files without a dataset".
  */
+/**
+ * Categories start collapsed, so a test that drives the cards inside them
+ * expands every category first.
+ */
+async function showCards(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const expand = screen.queryByRole("button", { name: "Expand all" });
+  if (expand) await user.click(expand);
+}
+
+/**
+ * Waits for the category list and reveals the cards inside it, for imports that
+ * do not go through the file input (pickers, dropped files).
+ */
+async function showCardsWhenReady(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const expand = await screen
+    .findByRole("button", { name: "Expand all" })
+    .catch(() => null);
+  if (expand) await user.click(expand);
+}
+
+/**
+ * Paging to another item loads a new document whose categories start collapsed
+ * again, so reveal them after the switch.
+ */
+async function revealCardsAfter(
+  user: ReturnType<typeof userEvent.setup>,
+  action: () => Promise<unknown> | unknown,
+): Promise<void> {
+  await action();
+  const groupToggle = await screen
+    .findByRole("button", { name: /^Toggle .+ boxes$/ })
+    .catch(() => null);
+  if (groupToggle) await showCards(user);
+}
+
 async function renderApp() {
   const view = render(<App />);
   const user = userEvent.setup();
@@ -412,6 +451,7 @@ it("imports, edits, saves, and exports JSONL label files", async () => {
     screen.getByLabelText("Open labels"),
     textFile(jsonl, "aerial.jsonl"),
   );
+  await showCards(user);
 
   expect(await screen.findByText("3 annotations")).toBeVisible();
   const panel = screen.getByRole("complementary", { name: "Annotations" });
@@ -925,6 +965,7 @@ it("lists label-only imports but disables bbox editing without image bounds", as
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0"),
   );
+  await showCards(user);
 
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
@@ -951,6 +992,7 @@ it("centers the viewport on the exact annotation clicked in the panel", async ()
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0"),
   );
+  await showCards(user);
   expect(await screen.findByDisplayValue("person")).toBeVisible();
   const imageSpace = screen.getByTestId("image-space");
   const startingOffsetX = Number(imageSpace.getAttribute("data-offset-x"));
@@ -996,6 +1038,7 @@ it("highlights and scrolls the exact card selected from a duplicate-label bbox",
       screen.getByLabelText("Open labels"),
       textFile("10 20 70 90 person 0\n100 110 180 200 person 0"),
     );
+  await showCards(user);
     expect(await screen.findAllByDisplayValue("person")).toHaveLength(2);
     const cards = [
       ...screen
@@ -1041,6 +1084,7 @@ it("separates a focused expression edit, canvas move, and later expression edit 
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -1159,6 +1203,7 @@ it("preserves a focused numeric draft through a canvas move and commits it after
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0"),
   );
+  await showCards(user);
   const x1 = await screen.findByRole("textbox", { name: "X1" });
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
@@ -1687,6 +1732,7 @@ it("saves edited TXT with a deterministic label stem and marks that snapshot cle
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "aerial.scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -1762,6 +1808,7 @@ it("retains a valid picker label handle and uses it for Save", async () => {
   await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await showCardsWhenReady(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -1801,6 +1848,7 @@ it("clears the retained handle after a valid hidden-input label import", async (
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 replacement label 0", "replacement.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -1838,6 +1886,7 @@ it("clears the retained handle after a valid dropped label import", async () => 
       files: [textFile("0 0 10 10 dropped label 0", "dropped.txt")],
     },
   });
+  await showCardsWhenReady(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2079,6 +2128,7 @@ it("surfaces save failures without marking edited annotations clean", async () =
   await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await showCardsWhenReady(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2112,6 +2162,7 @@ it("keeps retained-handle AbortError cancellation silent and dirty", async () =>
   await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await showCardsWhenReady(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2140,6 +2191,7 @@ it("saves through Save As and marks the written annotation snapshot clean", asyn
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2168,6 +2220,7 @@ it("falls back to a Save As download and marks the downloaded snapshot clean", a
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2195,6 +2248,7 @@ it("keeps Save As cancellation silent without marking edits clean", async () => 
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2221,6 +2275,7 @@ it("surfaces Save As failures without marking edited annotations clean", async (
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2254,6 +2309,7 @@ it("does not mark newer edits clean when an older Save finishes", async () => {
   await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await showCardsWhenReady(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2298,6 +2354,7 @@ it("does not mark newer edits clean when an older Save As finishes", async () =>
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2328,6 +2385,7 @@ it("maps editor history and delete shortcuts while protecting editable fields", 
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   await user.click(await screen.findByText("Annotation 1"));
 
   fireEvent.keyDown(window, { key: "Delete" });
@@ -2363,6 +2421,7 @@ it("commits a focused expression transaction before shortcut Undo", async () => 
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2397,6 +2456,7 @@ it("commits a focused numeric draft before shortcut Undo", async () => {
     screen.getByLabelText("Open labels"),
     textFile("10 10 30 30 person 0", "scene.txt"),
   );
+  await showCards(user);
   const x1 = await screen.findByRole("textbox", { name: "X1" });
   await user.click(x1);
   await user.clear(x1);
@@ -2424,6 +2484,7 @@ it("commits a focused expression transaction before shortcut Save", async () => 
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2461,6 +2522,7 @@ it("commits a focused numeric draft before shortcut Save", async () => {
     screen.getByLabelText("Open labels"),
     textFile("10 10 30 30 person 0", "scene.txt"),
   );
+  await showCards(user);
   const { blobs, click } = mockDownloadEnvironment();
   const x1 = await screen.findByRole("textbox", { name: "X1" });
   await user.click(x1);
@@ -2494,6 +2556,7 @@ it("exposes disabled-aware Undo and Redo toolbar controls", async () => {
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   expect(undo).toBeDisabled();
   expect(redo).toBeDisabled();
 
@@ -2536,6 +2599,7 @@ it("exports exact TXT and JSON snapshots without marking edits clean", async () 
     screen.getByLabelText("Open labels"),
     textFile("10 20 30 40 delivery truck 0", "aerial.labels.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2608,6 +2672,7 @@ it("installs the beforeunload warning only while annotations are dirty", async (
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
+  await showCards(user);
   expect(
     addEventListener.mock.calls.some(([type]) => type === "beforeunload"),
   ).toBe(false);
@@ -2658,6 +2723,7 @@ it("protects an uncommitted coordinate draft as an unsaved change", async () => 
     screen.getByLabelText("Open labels"),
     textFile("10 20 30 40 person 0", "scene.txt"),
   );
+  await showCards(user);
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
 
   const x1 = await screen.findByRole("textbox", { name: "X1" });
@@ -2699,6 +2765,7 @@ it("clears effective dirty when an invalid coordinate draft resets on blur", asy
     screen.getByLabelText("Open labels"),
     textFile("10 20 30 40 person 0", "scene.txt"),
   );
+  await showCards(user);
   const x1 = await screen.findByRole("textbox", { name: "X1" });
   await user.click(x1);
   fireEvent.change(x1, { target: { value: "-" } });
@@ -2729,6 +2796,7 @@ it("clears the coordinate draft marker when a valid commit is saved", async () =
     screen.getByLabelText("Open labels"),
     textFile("10 20 30 40 person 0", "scene.txt"),
   );
+  await showCards(user);
   const x1 = await screen.findByRole("textbox", { name: "X1" });
   await user.click(x1);
   fireEvent.change(x1, { target: { value: "12" } });
@@ -2756,6 +2824,7 @@ it("clears effective dirty when a focused coordinate draft is reverted", async (
     screen.getByLabelText("Open labels"),
     textFile("10 20 30 40 person 0", "scene.txt"),
   );
+  await showCards(user);
   const x1 = await screen.findByRole("textbox", { name: "X1" });
   await user.click(x1);
   fireEvent.change(x1, { target: { value: "12" } });
@@ -2786,6 +2855,7 @@ it("removes a stale coordinate draft when an import unmounts its card", async ()
       "scene.txt",
     ),
   );
+  await showCards(user);
   const secondX1 = (await screen.findAllByRole("textbox", { name: "X1" }))[1]!;
   await user.click(secondX1);
   fireEvent.change(secondX1, { target: { value: "-" } });
@@ -2822,6 +2892,7 @@ it("resets a focused coordinate draft before a same-ID label import", async () =
     screen.getByLabelText("Open labels"),
     textFile("10 20 30 40 person 0", "scene.txt"),
   );
+  await showCards(user);
   const x1 = await screen.findByRole("textbox", { name: "X1" });
   await user.click(x1);
   fireEvent.change(x1, { target: { value: "-" } });
@@ -2835,7 +2906,15 @@ it("resets a focused coordinate draft before a same-ID label import", async () =
     },
   });
 
-  await waitFor(() => expect(x1).toHaveValue("12"));
+  // The draft belonged to the replaced document; the fresh card starts from
+  // the imported coordinates once its category is revealed again.
+  await waitFor(() =>
+    expect(screen.getByLabelText("Total annotations")).toHaveTextContent(
+      "1 annotation",
+    ),
+  );
+  await showCardsWhenReady(user);
+  expect(await screen.findByRole("textbox", { name: "X1" })).toHaveValue("12");
   expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
     "car",
   );
@@ -2851,6 +2930,7 @@ it("keeps the search field focused while its global Save shortcut runs", async (
     screen.getByLabelText("Open labels"),
     textFile("0 0 10 10 delivery person 0", "scene.txt"),
   );
+  await showCards(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2902,6 +2982,7 @@ it("commits the newest concurrent Save snapshot last and reports it saved", asyn
   await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await showCardsWhenReady(user);
   const expression = await screen.findByRole("textbox", {
     name: "Expression",
   });
@@ -2956,6 +3037,7 @@ it("reports clamped imported boxes without losing valid annotations", async () =
     screen.getByLabelText("Open labels"),
     textFile("1900 100 2000 200 edge car 0"),
   );
+  await showCards(user);
 
   expect(
     await screen.findByText("Clamped 1 bounding box to the image bounds."),
@@ -3179,6 +3261,36 @@ it("keeps the canvas clean until a category is selected", async () => {
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
 });
 
+it("keeps every category collapsed until one is picked", async () => {
+  const user = userEvent.setup();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  await screen.findByText("person", { exact: true });
+
+  // Only the expressions are listed at first.
+  const personToggle = screen.getByRole("button", {
+    name: "Toggle person boxes",
+  });
+  expect(personToggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
+  expect(screen.queryByDisplayValue("bicycle")).not.toBeInTheDocument();
+
+  // Picking the expression reveals its boxes.
+  await user.click(screen.getByText("person", { exact: true }));
+
+  expect(personToggle).toHaveAttribute("aria-expanded", "true");
+  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  expect(screen.queryByDisplayValue("bicycle")).not.toBeInTheDocument();
+
+  // Its arrow collapses it again.
+  await user.click(personToggle);
+  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
+});
+
 it("draws the box of a card selected from the panel", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
@@ -3193,6 +3305,7 @@ it("draws the box of a card selected from the panel", async () => {
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0\n100 110 180 200 person 0"),
   );
+  await showCards(user);
   await screen.findByText("person", { exact: true });
   expect(screen.queryByTestId("bbox-ann_002")).not.toBeInTheDocument();
 
@@ -3215,6 +3328,7 @@ it("groups panel cards by their text label with one subcard per box", async () =
       "10 20 70 90 person 0\n100 110 180 200 person 0\n0 0 10 10 bicycle 0\n200 200 260 280 person 0",
     ),
   );
+  await showCards(user);
 
   const panel = await screen.findByRole("complementary", {
     name: "Annotations",
@@ -3334,6 +3448,7 @@ it("collapses and reopens a category from its header control", async () => {
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
   );
+  await showCards(user);
   const panel = await screen.findByRole("complementary", {
     name: "Annotations",
   });
@@ -3370,6 +3485,7 @@ it("reopens a collapsed category when its box is selected on the canvas", async 
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0\n100 110 180 200 person 0"),
   );
+  await showCards(user);
   await screen.findByText("person", { exact: true });
 
   await user.click(screen.getByRole("button", { name: "Toggle person boxes" }));
@@ -3439,6 +3555,7 @@ it("moves a box into another category after editing its expression", async () =>
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
   );
+  await showCards(user);
   const panel = await screen.findByRole("complementary", {
     name: "Annotations",
   });
@@ -3468,6 +3585,7 @@ it("keeps the editing card stable while its new label matches another category",
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
   );
+  await showCards(user);
   const panel = await screen.findByRole("complementary", {
     name: "Annotations",
   });
@@ -3500,6 +3618,7 @@ it("collapses and expands every category at once", async () => {
     screen.getByLabelText("Open labels"),
     textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
   );
+  await showCards(user);
   const panel = await screen.findByRole("complementary", {
     name: "Annotations",
   });
@@ -3542,6 +3661,7 @@ it("falls back to the classic file dialog when direct file access is blocked", a
     screen.getByLabelText("Fallback label file"),
     textFile("0 0 10 10 fallback label 0"),
   );
+  await showCards(user);
 
   expect(await screen.findByDisplayValue("fallback label")).toBeVisible();
   expect(screen.getByTestId("editor-notice")).toHaveTextContent(
@@ -3567,6 +3687,7 @@ it("downloads instead of writing when the retained handle is blocked", async () 
   await renderApp();
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await showCardsWhenReady(user);
   expect(await screen.findByDisplayValue("person")).toBeVisible();
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
@@ -3777,7 +3898,9 @@ it("scales normalized JSONL dataset targets to image pixels and back", async () 
   await user.click(
     within(dialog).getByRole("button", { name: "Toggle dji items" }),
   );
-  await user.click(within(dialog).getByRole("button", { name: "Open" }));
+  await revealCardsAfter(user, () =>
+    user.click(within(dialog).getByRole("button", { name: "Open" })),
+  );
 
   const panel = await screen.findByRole("complementary", { name: "Annotations" });
   expect(within(panel).getByLabelText("X1")).toHaveValue("1831.68");
@@ -3814,12 +3937,14 @@ it("scales normalized JSONL labels once their image arrives later", async () => 
     ),
   );
   // Without an image the normalized grid is kept as-is.
+  await showCardsWhenReady(user);
   expect(await screen.findByLabelText("X2")).toHaveValue("200");
 
   await user.upload(
     screen.getByLabelText("Open image"),
     new File(["pixels"], "scene.png", { type: "image/png" }),
   );
+  await showCards(user);
 
   await waitFor(() => expect(screen.getByLabelText("X2")).toHaveValue("400"));
   expect(screen.getByLabelText("Y2")).toHaveValue("300");
@@ -3871,6 +3996,12 @@ async function openDatasetStem(
   );
   if (!row) throw new Error(`missing dataset item row for ${stem}`);
   await user.click(within(row).getByRole("button", { name: "Open" }));
+  // The canvas loads asynchronously; wait for the panel to list the imported
+  // expressions before revealing their cards.
+  const groupToggle = await screen
+    .findByRole("button", { name: /^Toggle .+ boxes$/ })
+    .catch(() => null);
+  if (groupToggle) await showCards(user);
 }
 
 it("switches between dataset items with previous and next", async () => {
@@ -3891,7 +4022,9 @@ it("switches between dataset items with previous and next", async () => {
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 3");
   expect(screen.getByLabelText("Open files")).toHaveTextContent("b.jpg");
 
-  await user.click(screen.getByRole("button", { name: "Next image" }));
+  await revealCardsAfter(user, () =>
+    user.click(screen.getByRole("button", { name: "Next image" })),
+  );
 
   expect(await screen.findByDisplayValue("gamma")).toBeVisible();
   expect(screen.getByLabelText("Open files")).toHaveTextContent("c.jpg");
@@ -3900,7 +4033,9 @@ it("switches between dataset items with previous and next", async () => {
   expect(screen.getByRole("button", { name: "Previous image" })).toBeEnabled();
 
   await user.click(screen.getByRole("button", { name: "Previous image" }));
-  await user.click(screen.getByRole("button", { name: "Previous image" }));
+  await revealCardsAfter(user, () =>
+    user.click(screen.getByRole("button", { name: "Previous image" })),
+  );
 
   expect(await screen.findByDisplayValue("alpha")).toBeVisible();
   expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
@@ -3947,7 +4082,9 @@ it("steps through dataset items that have no labels", async () => {
     'No label file yet for "b"',
   );
 
-  await user.click(screen.getByRole("button", { name: "Previous image" }));
+  await revealCardsAfter(user, () =>
+    user.click(screen.getByRole("button", { name: "Previous image" })),
+  );
   expect(await screen.findByDisplayValue("person")).toBeVisible();
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 2");
 });
@@ -3996,9 +4133,11 @@ it("asks before discarding unsaved edits when switching dataset items", async ()
   expect(screen.getByDisplayValue("changed")).toBeVisible();
 
   await user.click(screen.getByRole("button", { name: "Next image" }));
-  await user.click(
-    await screen.findByRole("button", { name: "Discard and switch" }),
-  );
+  await revealCardsAfter(user, async () => {
+    await user.click(
+      await screen.findByRole("button", { name: "Discard and switch" }),
+    );
+  });
 
   expect(await screen.findByDisplayValue("beta")).toBeVisible();
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 3");
@@ -4019,10 +4158,14 @@ it("moves between dataset items with Alt+Arrow keys", async () => {
   await openDatasetStem(user, "a");
   expect(await screen.findByDisplayValue("alpha")).toBeVisible();
 
-  fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
+  await revealCardsAfter(user, () => {
+    fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
+  });
   expect(await screen.findByDisplayValue("beta")).toBeVisible();
 
-  fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
+  await revealCardsAfter(user, () => {
+    fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
+  });
   expect(await screen.findByDisplayValue("alpha")).toBeVisible();
 });
 
@@ -4050,8 +4193,8 @@ it("lands on the dataset home and opens an item from there", async () => {
   ).not.toBeInTheDocument();
 
   // Clicking the card itself opens the dataset.
-  await user.click(
-    within(card).getByRole("button", { name: "Open dataset dji" }),
+  await revealCardsAfter(user, () =>
+    user.click(within(card).getByRole("button", { name: "Open dataset dji" })),
   );
 
   expect(
@@ -4422,13 +4565,14 @@ it("re-enters the imported item on the canvas after Confirm import", async () =>
       textFile("10 20 110 120 person 0", "a.txt"),
     ],
   );
+  await showCards(user);
   await waitFor(() =>
     expect(within(dialog).getByTestId("staged-state-a")).toHaveTextContent(
       "image + labels",
     ),
   );
-  await user.click(
-    within(dialog).getByRole("button", { name: "Confirm import" }),
+  await revealCardsAfter(user, () =>
+    user.click(within(dialog).getByRole("button", { name: "Confirm import" })),
   );
 
   expect(
