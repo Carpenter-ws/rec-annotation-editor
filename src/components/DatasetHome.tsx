@@ -44,6 +44,7 @@ export function DatasetHome({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
@@ -73,6 +74,7 @@ export function DatasetHome({
     try {
       await createDataset(name);
       setNewName("");
+      setCreateOpen(false);
       await refresh();
     } catch (cause) {
       setError(
@@ -155,26 +157,21 @@ export function DatasetHome({
             </p>
           </div>
           <div className="home-create">
-            <label>
-              New dataset
-              <input
-                value={newName}
-                placeholder="Dataset name"
-                aria-label="New dataset name"
-                onChange={(event) => setNewName(event.currentTarget.value)}
-              />
-            </label>
             <button
               type="button"
-              disabled={busy || newName.trim().length === 0}
-              onClick={() => void handleCreate()}
+              className="home-primary"
+              onClick={() => {
+                setError(null);
+                setNewName("");
+                setCreateOpen(true);
+              }}
             >
               Create dataset
             </button>
           </div>
         </div>
 
-        {error ? <p role="alert">{error}</p> : null}
+        {error && !createOpen ? <p role="alert">{error}</p> : null}
 
         {datasets.length > 0 ? (
           <div className="home-filter">
@@ -331,6 +328,50 @@ export function DatasetHome({
           </section>
         ) : null}
       </main>
+
+      {createOpen ? (
+        <div className="confirm-backdrop">
+          <form
+            className="confirm-dialog home-create-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="home-create-title"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreate();
+            }}
+          >
+            <h2 id="home-create-title">New dataset</h2>
+            <p>
+              It is stored in the project's <code>datasets/</code> folder. Add
+              images and their <code>.txt</code>/<code>.jsonl</code> label files
+              right after creating it.
+            </p>
+            <label>
+              Dataset name
+              <input
+                autoFocus
+                value={newName}
+                placeholder="Dataset name"
+                aria-label="New dataset name"
+                onChange={(event) => setNewName(event.currentTarget.value)}
+              />
+            </label>
+            {error ? <p role="alert">{error}</p> : null}
+            <div className="confirm-actions">
+              <button type="button" onClick={() => setCreateOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={busy || newName.trim().length === 0}
+              >
+                Create
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {pendingDelete ? (
         <ConfirmDialog

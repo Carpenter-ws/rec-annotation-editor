@@ -3291,6 +3291,72 @@ it("keeps every category collapsed until one is picked", async () => {
   expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
 });
 
+it("deletes a whole expression after confirming", async () => {
+  const user = userEvent.setup();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(
+      "10 20 70 90 person 0\n100 110 180 200 person 0\n0 0 10 10 bicycle 0",
+    ),
+  );
+  await showCards(user);
+  expect(screen.getByRole("status")).toHaveTextContent("3 annotations");
+
+  await user.click(
+    screen.getByRole("button", { name: 'Delete "person" boxes' }),
+  );
+
+  const confirm = await screen.findByRole("dialog", {
+    name: 'Delete every "person" box?',
+  });
+  expect(confirm).toHaveTextContent("2 boxes");
+  expect(screen.getByRole("status")).toHaveTextContent("3 annotations");
+
+  await user.click(within(confirm).getByRole("button", { name: "Delete boxes" }));
+
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
+  expect(screen.getByDisplayValue("bicycle")).toBeVisible();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  // One undo brings the whole expression back.
+  await user.click(screen.getByRole("button", { name: "Undo" }));
+  expect(screen.getByRole("status")).toHaveTextContent("3 annotations");
+  expect(await screen.findAllByDisplayValue("person")).toHaveLength(2);
+});
+
+it("keeps an expression when its deletion is cancelled", async () => {
+  const user = userEvent.setup();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("10 20 70 90 person 0\n0 0 10 10 bicycle 0"),
+  );
+  await showCards(user);
+
+  await user.click(
+    screen.getByRole("button", { name: 'Delete "person" boxes' }),
+  );
+  const confirm = await screen.findByRole("dialog", {
+    name: 'Delete every "person" box?',
+  });
+  await user.click(
+    within(confirm).getByRole("button", { name: "Keep them" }),
+  );
+
+  expect(
+    screen.queryByRole("dialog", { name: 'Delete every "person" box?' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("2 annotations");
+  expect(screen.getByDisplayValue("person")).toBeVisible();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+});
+
 it("draws the box of a card selected from the panel", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);

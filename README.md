@@ -43,8 +43,9 @@ lives:
 - **Manage files** opens the file manager already expanded on that dataset, for
   adding or replacing images and label files;
 - **Delete** removes the dataset and its files from disk after a confirmation;
-- **New dataset / Create dataset** starts a new empty group at the top of the
-  page;
+- **Create dataset** opens a small card that asks for the name (the button is
+  disabled until something is typed); **Cancel** throws the half-typed name
+  away, so the page never shows an empty form next to the datasets;
 - **Open files without a dataset** goes straight to the editor for a one-off
   image + label pair; **Home** in the toolbar brings you back at any time.
 
@@ -76,6 +77,9 @@ lives:
    - **Add** on a category header draws a new box of that category: drag a
      rectangle on the image and it joins the category immediately (no dialog);
      keep drawing to add more, press `Esc` to stop;
+   - the `×` next to a category header deletes **the whole expression**: a
+     confirmation reports how many boxes it removes, and the deletion is one
+     undo step (isolation and hover of that category are cleared with it);
    - click a box (or a card) to select it; the panel locates the matching card
      and vice versa;
    - drag a box to move it; drag a **corner** handle to resize it (both axes at

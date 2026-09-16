@@ -140,20 +140,55 @@ it("hands the dataset over for file management", async () => {
   expect(props.onManage).toHaveBeenCalledWith("empty");
 });
 
-it("creates a dataset and reloads the list", async () => {
+it("asks for the name only after Create dataset is clicked", async () => {
   const user = userEvent.setup();
   vi.mocked(datasetApi.createDataset).mockResolvedValue(undefined);
   renderHome();
   await screen.findByTestId("dataset-card-dji");
 
-  await user.type(screen.getByLabelText("New dataset name"), "night-flights");
+  // Nothing to fill in upfront.
+  expect(screen.queryByLabelText("New dataset name")).not.toBeInTheDocument();
+
   await user.click(screen.getByRole("button", { name: "Create dataset" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "New dataset" });
+  const name = within(dialog).getByLabelText("New dataset name");
+  const confirm = within(dialog).getByRole("button", { name: "Create" });
+  expect(confirm).toBeDisabled();
+
+  await user.type(name, "night-flights");
+  await user.click(confirm);
 
   await waitFor(() =>
     expect(datasetApi.createDataset).toHaveBeenCalledWith("night-flights"),
   );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "New dataset" }),
+    ).not.toBeInTheDocument(),
+  );
   expect(vi.mocked(datasetApi.listDatasets).mock.calls.length).toBeGreaterThan(1);
-  expect(screen.getByLabelText("New dataset name")).toHaveValue("");
+});
+
+it("discards a half-typed name when the new-dataset dialog is cancelled", async () => {
+  const user = userEvent.setup();
+  renderHome();
+  await screen.findByTestId("dataset-card-dji");
+
+  await user.click(screen.getByRole("button", { name: "Create dataset" }));
+  const dialog = await screen.findByRole("dialog", { name: "New dataset" });
+  await user.type(within(dialog).getByLabelText("New dataset name"), "typo");
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+  expect(
+    screen.queryByRole("dialog", { name: "New dataset" }),
+  ).not.toBeInTheDocument();
+  expect(datasetApi.createDataset).not.toHaveBeenCalled();
+
+  // Reopening starts from an empty field.
+  await user.click(screen.getByRole("button", { name: "Create dataset" }));
+  const reopened = await screen.findByRole("dialog", { name: "New dataset" });
+  expect(within(reopened).getByLabelText("New dataset name")).toHaveValue("");
 });
 
 it("deletes a dataset after confirming", async () => {

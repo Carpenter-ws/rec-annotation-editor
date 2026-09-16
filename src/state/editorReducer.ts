@@ -46,6 +46,7 @@ export type EditorAction =
     }
   | { type: "ADD_ANNOTATION"; annotation: Annotation }
   | { type: "DELETE_ANNOTATION"; id: string }
+  | { type: "DELETE_LABEL"; label: string }
   | { type: "UNDO" }
   | { type: "REDO" }
   | { type: "MARK_SAVED" };
@@ -261,6 +262,22 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       );
       if (committed === resolved) return resolved;
       return resolved.selectedId === action.id
+        ? { ...committed, selectedId: null }
+        : committed;
+    }
+
+    case "DELETE_LABEL": {
+      const resolved = resolveTransaction(state);
+      const remaining = resolved.annotations.filter(
+        (annotation) => annotation.label !== action.label,
+      );
+      if (remaining.length === resolved.annotations.length) return resolved;
+      const committed = commitAtomicEdit(resolved, remaining);
+      if (committed === resolved) return resolved;
+      const selected = resolved.annotations.find(
+        (annotation) => annotation.id === resolved.selectedId,
+      );
+      return selected && selected.label === action.label
         ? { ...committed, selectedId: null }
         : committed;
     }

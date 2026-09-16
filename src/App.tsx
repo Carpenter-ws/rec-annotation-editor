@@ -217,6 +217,10 @@ function EditorWorkspace(): JSX.Element {
   /** Mirrors `datasetView` for callbacks that must not wait for a render. */
   const datasetViewRef = useRef<DatasetView | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<DatasetItem | null>(null);
+  /** Expression whose boxes the user asked to delete, awaiting confirmation. */
+  const [pendingCategoryDelete, setPendingCategoryDelete] = useState<
+    string | null
+  >(null);
   /** JSONL labels whose normalized targets still await an image size. */
   const normalizedSourceRef = useRef(false);
   const [toast, setToast] = useState<{ key: number; message: string } | null>(
@@ -297,6 +301,22 @@ function EditorWorkspace(): JSX.Element {
     },
     [dispatch],
   );
+  const pendingCategoryCount =
+    pendingCategoryDelete === null
+      ? 0
+      : state.annotations.filter(
+          (annotation) => annotation.label === pendingCategoryDelete,
+        ).length;
+  const confirmCategoryDelete = useCallback(() => {
+    const label = pendingCategoryDelete;
+    setPendingCategoryDelete(null);
+    if (label === null) return;
+    dispatch({ type: "DELETE_LABEL", label });
+    // Isolation and hover must not outlive the category they point at.
+    setActiveLabel((current) => (current === label ? null : current));
+    setHighlightedLabel((current) => (current === label ? null : current));
+  }, [dispatch, pendingCategoryDelete]);
+
   const handleActivateLabel = useCallback(
     (label: string) => {
       setActiveLabel((current) => {
@@ -1094,6 +1114,7 @@ function EditorWorkspace(): JSX.Element {
             onActivateLabel={handleActivateLabel}
             onReset={handleResetView}
             onAddToCategory={handleAddToCategory}
+            onDeleteCategory={setPendingCategoryDelete}
           />
         </aside>
       </main>
@@ -1116,6 +1137,18 @@ function EditorWorkspace(): JSX.Element {
         issues={errorReport?.issues ?? []}
         onClose={() => setErrorReport(null)}
       />
+      {pendingCategoryDelete !== null ? (
+        <ConfirmDialog
+          title={`Delete every "${pendingCategoryDelete}" box?`}
+          message={`Removes ${pendingCategoryCount} ${
+            pendingCategoryCount === 1 ? "box" : "boxes"
+          } with this expression from the document. Undo brings them back.`}
+          confirmLabel="Delete boxes"
+          cancelLabel="Keep them"
+          onConfirm={confirmCategoryDelete}
+          onCancel={() => setPendingCategoryDelete(null)}
+        />
+      ) : null}
       {pendingSwitch && datasetView ? (
         <ConfirmDialog
           title="Discard unsaved changes?"

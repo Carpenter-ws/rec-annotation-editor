@@ -25,6 +25,8 @@ export interface AnnotationPanelProps {
   onReset?: () => void;
   /** Arm add-box mode so the next drawn box joins this category. */
   onAddToCategory?: (label: string) => void;
+  /** Remove every box of one expression (the caller confirms it first). */
+  onDeleteCategory?: (label: string) => void;
 }
 
 interface AnnotationEntry {
@@ -51,6 +53,7 @@ export function AnnotationPanel({
   onActivateLabel,
   onReset,
   onAddToCategory,
+  onDeleteCategory,
 }: AnnotationPanelProps): JSX.Element {
   const [query, setQuery] = useState("");
   const [activeExpressionId, setActiveExpressionId] = useState<string | null>(
@@ -319,6 +322,17 @@ export function AnnotationPanel({
                 >
                   Add
                 </button>
+                {onDeleteCategory ? (
+                  <button
+                    type="button"
+                    className="annotation-group-delete"
+                    aria-label={`Delete "${group.label}" boxes`}
+                    title={`Delete every "${group.label}" box`}
+                    onClick={() => onDeleteCategory(group.label)}
+                  >
+                    ×
+                  </button>
+                ) : null}
               </header>,
             ];
             if (!collapsed) {

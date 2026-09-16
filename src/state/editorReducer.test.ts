@@ -472,6 +472,87 @@ it("preserves history and redo for a delete with a missing id", () => {
   expect(unchanged.future).toEqual([[{ ...person, label: "changed" }]]);
 });
 
+it("deletes every box of one expression as one undo unit", () => {
+  const car: Annotation = { ...person, id: "ann_003", label: "car" };
+  const loaded = loadedState([person, secondPerson, car]);
+  expect(loaded.annotations).toHaveLength(3);
+
+  const deleted = editorReducer(loaded, {
+    type: "DELETE_LABEL",
+    label: "person",
+  });
+
+  expect(deleted.annotations).toEqual([car]);
+  // One entry for the whole expression, not one per box.
+  expect(deleted.past).toEqual([[person, secondPerson, car]]);
+
+  const undone = editorReducer(deleted, { type: "UNDO" });
+  expect(undone.annotations).toEqual([person, secondPerson, car]);
+  expect(undone.dirty).toBe(false);
+});
+
+it("clears a selection that goes away with its expression", () => {
+  const car: Annotation = { ...person, id: "ann_003", label: "car" };
+  const selected = editorReducer(loadedState([person, secondPerson, car]), {
+    type: "SELECT",
+    id: "ann_002",
+  });
+
+  const deleted = editorReducer(selected, {
+    type: "DELETE_LABEL",
+    label: "person",
+  });
+
+  expect(deleted.annotations).toEqual([car]);
+  expect(deleted.selectedId).toBeNull();
+});
+
+it("keeps a selection that belongs to another expression", () => {
+  const car: Annotation = { ...person, id: "ann_003", label: "car" };
+  const selected = editorReducer(loadedState([person, car]), {
+    type: "SELECT",
+    id: "ann_003",
+  });
+
+  const deleted = editorReducer(selected, {
+    type: "DELETE_LABEL",
+    label: "person",
+  });
+
+  expect(deleted.annotations).toEqual([car]);
+  expect(deleted.selectedId).toBe("ann_003");
+});
+
+it("leaves history and redo untouched when the expression is not there", () => {
+  const branched = stateWithRedoBranch();
+
+  const unchanged = editorReducer(branched, {
+    type: "DELETE_LABEL",
+    label: "missing",
+  });
+
+  expect(unchanged).toBe(branched);
+  expect(unchanged.past).toEqual([]);
+  expect(unchanged.future).toEqual([[{ ...person, label: "changed" }]]);
+});
+
+it("commits an active preview transaction before deleting an expression", () => {
+  const active = activeBranchedTransaction();
+  const labelled = editorReducer(active, {
+    type: "PREVIEW_PATCH",
+    id: "ann_001",
+    patch: { label: "person" },
+  });
+
+  const deleted = editorReducer(labelled, {
+    type: "DELETE_LABEL",
+    label: "person",
+  });
+
+  expect(deleted.annotations).toEqual([]);
+  expect(deleted.transactionBase).toBeNull();
+});
+
 it("does not evict real bounded history with a same-value update", () => {
   let state = loadedState([person]);
 

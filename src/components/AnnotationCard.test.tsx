@@ -474,6 +474,43 @@ it("keeps each card's source ordinal while filtering", async () => {
   expect(screen.queryByText("Annotation 1")).not.toBeInTheDocument();
 });
 
+it("offers deleting a whole expression from its header", async () => {
+  const user = userEvent.setup();
+  const onDeleteCategory = vi.fn();
+  render(
+    <AnnotationPanel
+      annotations={[annotation, { ...annotation, id: "ann_002" }]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+      onDeleteCategory={onDeleteCategory}
+    />,
+  );
+
+  await user.click(
+    screen.getByRole("button", { name: 'Delete "person" boxes' }),
+  );
+
+  expect(onDeleteCategory).toHaveBeenCalledWith("person");
+});
+
+it("hides the expression delete control when the panel cannot delete", () => {
+  render(
+    <AnnotationPanel
+      annotations={[annotation]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+    />,
+  );
+
+  expect(
+    screen.queryByRole("button", { name: 'Delete "person" boxes' }),
+  ).not.toBeInTheDocument();
+});
+
 it("selects and locates the exact clicked annotation ID", async () => {
   const user = userEvent.setup();
   const dispatch = vi.fn();
