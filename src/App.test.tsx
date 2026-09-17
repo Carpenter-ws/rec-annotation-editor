@@ -687,6 +687,7 @@ it("adds and selects a trimmed original-coordinate annotation without moving the
         bbox: { x1: 100, y1: 100, x2: 200, y2: 200 },
         label: "vehicle",
         level: null,
+        referenceId: null,
         reservedField: "0",
       },
     },
@@ -1469,25 +1470,173 @@ it("keeps the current document when a new file contains invalid lines", async ()
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-it("loads the first recognized dropped file and reports extras explicitly", async () => {
+it("gives each dropped file its role and reports the rest as rejected", async () => {
   await renderApp();
   const labels = textFile("0 0 10 10 first label 0", "first.txt");
-  const extraLabels = textFile("0 0 10 10 ignored 0", "extra.TXT");
+  const originals = textFile("0 0 20 20 boat", "extra.TXT");
   const archive = new File(["zip"], "scene.zip", {
     type: "application/zip",
   });
 
   fireEvent.drop(screen.getByRole("region", { name: "Image workspace" }), {
-    dataTransfer: { files: [labels, extraLabels, archive] },
+    dataTransfer: { files: [labels, originals, archive] },
   });
 
   expect(await screen.findByText("first label")).toBeVisible();
+  // The second label file becomes the picking pool instead of being rejected.
+  expect(
+    await screen.findByRole("group", { name: "Original annotations" }),
+  ).toHaveTextContent("Original 0 / 1 added");
   const dialog = await screen.findByRole("dialog", {
     name: "Some dropped files were rejected",
   });
-  expect(dialog).toHaveTextContent("extra.TXT");
   expect(dialog).toHaveTextContent("scene.zip");
-  expect(screen.queryByText("ignored", { exact: true })).not.toBeInTheDocument();
+  expect(dialog).not.toHaveTextContent("extra.TXT");
+});
+
+it("accepts an original annotation on click and hands it back when deleted", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  const { blobs, click } = mockDownloadEnvironment();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  await showCards(user);
+  await user.upload(
+    screen.getByLabelText("Open original annotations"),
+    textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
+  );
+
+  // The originals arrive untouched: nothing was added to the document yet.
+  const bar = await screen.findByRole("group", {
+    name: "Original annotations",
+  });
+  expect(bar).toHaveTextContent("Original 0 / 2 added");
+  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute(
+    "data-state",
+    "pending",
+  );
+  expect(screen.getByTestId("ref-ref_002")).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+
+  // Clicking one accepts it: the document box takes over the canvas.
+  fireEvent.click(screen.getByTestId("ref-ref_001"));
+
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("2 annotations"),
+  );
+  expect(screen.queryByTestId("ref-ref_001")).not.toBeInTheDocument();
+  const added = screen.getByTestId("bbox-ann_002");
+  expect(added).toHaveAttribute("x", "20");
+  expect(added).toHaveAttribute("width", "40");
+  expect(bar).toHaveTextContent("Original 1 / 2 added");
+
+  // Deleting the box hands the original back to the pool.
+  const panel = screen.getByRole("complementary", { name: "Annotations" });
+  await user.click(
+    within(panel.querySelector('[data-annotation-id="ann_002"]')!).getByRole(
+      "button",
+      { name: "Delete annotation" },
+    ),
+  );
+
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("1 annotation"),
+  );
+  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute(
+    "data-state",
+    "pending",
+  );
+  expect(bar).toHaveTextContent("Original 0 / 2 added");
+
+  // Only the accepted box is saved; untouched originals stay out of the file.
+  await user.click(screen.getByTestId("ref-ref_002"));
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("2 annotations"),
+  );
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+  expect(await readBlob(blobs[1]!)).toBe(
+    "0.00 0.00 10.00 10.00 person 0\n100.00 100.00 200.00 200.00 boat 0\n",
+  );
+});
+
+it("keeps the originals read-only until their editing mode is unlocked", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  mockPointerEnvironment();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await showCards(user);
+  await user.upload(
+    screen.getByLabelText("Open original annotations"),
+    textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
+  );
+  await screen.findByTestId("ref-ref_001");
+  const canvas = screen.getByLabelText("Annotation canvas");
+  Object.assign(canvas, {
+    setPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+  });
+
+  // A drag outside the mode must not move an original.
+  fireEvent.pointerDown(screen.getByTestId("ref-ref_001"), {
+    pointerId: 11,
+    clientX: 30,
+    clientY: 30,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, { pointerId: 11, clientX: 120, clientY: 120 });
+  fireEvent.pointerUp(canvas, { pointerId: 11, clientX: 120, clientY: 120 });
+  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute("x", "20");
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+
+  // Unlocking editing turns a click into a selection instead of an acceptance.
+  await user.click(
+    screen.getByRole("button", { name: "Edit original annotations" }),
+  );
+  await user.click(screen.getByTestId("ref-ref_001"));
+  expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
+  expect(
+    screen.getByLabelText("Expression of ref_001"),
+  ).toHaveValue("boat");
+
+  // Now it can be moved, renamed, and deleted.
+  fireEvent.pointerDown(screen.getByTestId("ref-ref_001"), {
+    pointerId: 12,
+    clientX: 40,
+    clientY: 40,
+    button: 0,
+  });
+  fireEvent.pointerMove(canvas, { pointerId: 12, clientX: 140, clientY: 140 });
+  fireEvent.pointerUp(canvas, { pointerId: 12, clientX: 140, clientY: 140 });
+  await waitFor(() =>
+    expect(screen.getByTestId("ref-ref_001")).not.toHaveAttribute("x", "20"),
+  );
+
+  const label = screen.getByLabelText("Expression of ref_001");
+  await user.clear(label);
+  await user.type(label, "vessel{Enter}");
+  expect(screen.getByTestId("ref-ref_001")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "Delete original ref_001" }));
+  expect(screen.queryByTestId("ref-ref_001")).not.toBeInTheDocument();
+  expect(screen.getByTestId("ref-ref_002")).toBeVisible();
 });
 
 it("clamps labels against an existing image and announces the count", async () => {

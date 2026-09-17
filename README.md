@@ -176,6 +176,36 @@ backend):
 - Once imported, items, files, and edits stay on disk.
 - Delete items or whole datasets from the same dialog.
 
+## Original annotations (a pool to pick new boxes from)
+
+**Open originals** in the toolbar (or drop the file onto the canvas) loads an
+original annotation file — TXT in pixels, JSONL normalized like a label file —
+and shows it as a layer to pick from. The originals are **not part of the
+document**: nothing is saved or exported until a box is accepted, and the file
+itself is never written back by the editor.
+
+- **untouched original** — a grey dashed box; click it to accept it, and its box
+  joins the document under the label it carries (the label's level comes along
+  when the document already knows it)
+- **accepted** — the document box takes over the canvas in solid cyan, and it
+  stays drawn even when no category is picked, so the result of picking stays
+  readable next to the dashed ones
+- **deleting it hands the original back** — the dashed box returns exactly as it
+  was, whichever way the box was removed (card `×`, `Delete`, or deleting the
+  whole expression)
+- the bar above the canvas counts the picks (`Original 3 / 12 added`), names the
+  file, and clears the layer;
+- **Edit original annotations** unlocks the layer itself: while it is on, a
+  click selects an original instead of accepting it, and it can be dragged,
+  resized, relabelled (`Expression` field in the bar), drawn (`Add box`), and
+  deleted (`Delete box`, or `Delete`). The mode has to be on for any of that —
+  outside it a drag on an original does nothing at all.
+
+The pool belongs to the document that is open: importing another image or label
+file, or opening another dataset item, clears it. Exporting and saving never
+include it, and the link to an original is not written to the file, so a
+reloaded document starts with an empty pool.
+
 ## REC JSONL format
 
 The JSONL format (one REC document per line) is fully supported for import,

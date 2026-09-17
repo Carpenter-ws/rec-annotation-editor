@@ -10,6 +10,8 @@ export interface ToolbarProps {
   onOpenImage: (file: File) => void;
   onOpenLabels: (file: File) => void;
   onPickLabels: () => void;
+  /** Original annotations, loaded as a pool to pick new boxes from. */
+  onOpenOriginals: (file: File) => void;
   onOpenDatasets: () => void;
   onSave: () => void;
   onSaveAs: () => void;
@@ -50,6 +52,7 @@ export function Toolbar({
   onOpenImage,
   onOpenLabels,
   onPickLabels,
+  onOpenOriginals,
   onOpenDatasets,
   onSave,
   onSaveAs,
@@ -76,6 +79,7 @@ export function Toolbar({
 }: ToolbarProps): JSX.Element {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
+  const originalInputRef = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
 
   const forwardFile = (
@@ -124,6 +128,21 @@ export function Toolbar({
           aria-label="Open labels"
           hidden
           onChange={(event) => forwardFile(event, onOpenLabels)}
+        />
+        <button
+          type="button"
+          title="Load the original annotations and pick boxes from them"
+          onClick={() => originalInputRef.current?.click()}
+        >
+          Open originals
+        </button>
+        <input
+          ref={originalInputRef}
+          type="file"
+          accept=".txt,.jsonl,text/plain"
+          aria-label="Open original annotations"
+          hidden
+          onChange={(event) => forwardFile(event, onOpenOriginals)}
         />
         <button type="button" onClick={onOpenDatasets}>
           Datasets

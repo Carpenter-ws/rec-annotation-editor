@@ -3,6 +3,8 @@ import type { ImageInfo } from "../domain/types";
 export interface DroppedFiles {
   image?: File;
   labels?: File;
+  /** A second label file in the same drop is the original annotations. */
+  reference?: File;
   rejected: File[];
 }
 
@@ -140,6 +142,7 @@ export function partitionDroppedFiles(files: readonly File[]): DroppedFiles {
   const result: DroppedFiles = {
     image: undefined,
     labels: undefined,
+    reference: undefined,
     rejected: [],
   };
 
@@ -148,6 +151,9 @@ export function partitionDroppedFiles(files: readonly File[]): DroppedFiles {
       result.image = file;
     } else if (isLabelFile(file) && !result.labels) {
       result.labels = file;
+    } else if (isLabelFile(file) && !result.reference) {
+      // Dropping image + labels + originals at once loads the picking pool too.
+      result.reference = file;
     } else {
       result.rejected.push(file);
     }

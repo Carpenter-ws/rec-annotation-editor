@@ -364,11 +364,29 @@ describe("partitionDroppedFiles", () => {
     expect(partitionDroppedFiles([archive]).rejected).toEqual([archive]);
   });
 
-  it("rejects extra image and label files instead of replacing the first match", () => {
+  it("treats a second label file as the original annotations", () => {
+    const image = new File(["image"], "scene.png", { type: "image/png" });
+    const labels = new File(["labels"], "scene.txt");
+    const originals = new File(["222 462 321 575 boat"], "DJI_0133.txt", {
+      type: "text/plain",
+    });
+
+    expect(partitionDroppedFiles([image, labels, originals])).toEqual({
+      image,
+      labels,
+      reference: originals,
+      rejected: [],
+    });
+  });
+
+  it("rejects extra images and a third label file", () => {
     const firstImage = new File(["image"], "first.png", { type: "image/png" });
     const firstLabels = new File(["labels"], "first.txt");
     const extraImage = new File(["image"], "extra.webp", { type: "image/webp" });
-    const extraLabels = new File(["labels"], "extra.TXT", {
+    const originals = new File(["labels"], "originals.TXT", {
+      type: "text/plain",
+    });
+    const thirdLabels = new File(["labels"], "third.TXT", {
       type: "text/plain",
     });
 
@@ -377,12 +395,14 @@ describe("partitionDroppedFiles", () => {
         firstImage,
         firstLabels,
         extraImage,
-        extraLabels,
+        originals,
+        thirdLabels,
       ]),
     ).toEqual({
       image: firstImage,
       labels: firstLabels,
-      rejected: [extraImage, extraLabels],
+      reference: originals,
+      rejected: [extraImage, thirdLabels],
     });
   });
 });

@@ -22,7 +22,7 @@ import {
   resizeBBox,
   type ResizeHandle,
 } from "../domain/bbox";
-import type { Annotation, BBox, ImageInfo } from "../domain/types";
+import type { Annotation, BBox, ImageInfo, ReferenceBox } from "../domain/types";
 import type { EditorAction } from "../state/editorReducer";
 
 const DEFAULT_TRANSFORM: ViewTransform = {
@@ -97,6 +97,16 @@ export interface ViewportProps {
   mode: "select" | "add";
   onDraftBox: (bbox: BBox) => void;
   initialTransform?: ViewTransform;
+  /** Original annotations the annotator picks from; never part of the document. */
+  referenceBoxes?: readonly ReferenceBox[];
+  /** Originals already accepted, drawn by their document box instead. */
+  acceptedReferenceIds?: ReadonlySet<string>;
+  /** While true the originals themselves can be moved, resized, or deleted. */
+  referenceEditing?: boolean;
+  selectedReferenceId?: string | null;
+  onReferencePick?: (id: string) => void;
+  onReferenceSelect?: (id: string | null) => void;
+  onReferenceChange?: (id: string, bbox: BBox) => void;
 }
 
 export interface ViewportHandle {
@@ -131,6 +141,20 @@ type PointerInteraction =
       pointerId: number;
       startImage: Point;
       currentImage: Point;
+    }
+  | {
+      type: "reference-move";
+      pointerId: number;
+      id: string;
+      startImage: Point;
+      startBBox: BBox;
+    }
+  | {
+      type: "reference-resize";
+      pointerId: number;
+      id: string;
+      handle: ResizeHandle;
+      startBBox: BBox;
     };
 
 interface AnnotationBoxProps {
@@ -138,6 +162,8 @@ interface AnnotationBoxProps {
   selected: boolean;
   highlighted: boolean;
   scale: number;
+  /** Reference boxes share the shape of a box but never the document styles. */
+  variant?: "annotation" | "reference";
   onSelect: (event: MouseEvent<SVGGElement>) => void;
   onPointerDown: (event: PointerEvent<SVGGElement>) => void;
   onResizePointerDown: (
@@ -151,10 +177,12 @@ function AnnotationBox({
   selected,
   highlighted,
   scale,
+  variant = "annotation",
   onSelect,
   onPointerDown,
   onResizePointerDown,
 }: AnnotationBoxProps): JSX.Element {
+  const isReference = variant === "reference";
   const { x1, y1, x2, y2 } = annotation.bbox;
   const width = x2 - x1;
   const height = y2 - y1;
@@ -172,26 +200,32 @@ function AnnotationBox({
 
   return (
     <g onClick={onSelect} onPointerDown={onPointerDown}>
-      <rect
-        x={x1}
-        y={y1}
-        width={width}
-        height={height}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={12}
-        pointerEvents="stroke"
-        vectorEffect="non-scaling-stroke"
-      />
+      {/* A document box is grabbed by its border, which leaves the image inside
+          it draggable. An original is picked by clicking anywhere inside it, so
+          it relies on its own faintly filled outline instead of a hit band. */}
+      {isReference ? null : (
+        <rect
+          x={x1}
+          y={y1}
+          width={width}
+          height={height}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={12}
+          pointerEvents="stroke"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
       <rect
         className={[
-          "annotation-bbox",
+          isReference ? "reference-bbox" : "annotation-bbox",
           selected ? "is-selected" : "",
           highlighted ? "is-highlighted" : "",
         ]
           .filter(Boolean)
           .join(" ")}
-        data-testid={`bbox-${annotation.id}`}
+        data-testid={isReference ? `ref-${annotation.id}` : `bbox-${annotation.id}`}
+        data-state={isReference ? "pending" : undefined}
         data-selected={selected ? "true" : "false"}
         data-highlighted={highlighted ? "true" : "false"}
         x={x1}
@@ -242,6 +276,13 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     mode,
     onDraftBox,
     initialTransform,
+    referenceBoxes = [],
+    acceptedReferenceIds,
+    referenceEditing = false,
+    selectedReferenceId = null,
+    onReferencePick,
+    onReferenceSelect,
+    onReferenceChange,
   },
   ref,
 ): JSX.Element {
@@ -257,8 +298,15 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     initialTransform ?? DEFAULT_TRANSFORM,
   );
   const [draftBBox, setDraftBBox] = useState<BBox | null>(null);
+  /** Live geometry of the original being dragged, until the pointer is up. */
+  const [referenceDraft, setReferenceDraft] = useState<{
+    id: string;
+    bbox: BBox;
+  } | null>(null);
   const transformRef = useRef(transform);
   transformRef.current = transform;
+  const referenceDraftRef = useRef<{ id: string; bbox: BBox } | null>(null);
+  referenceDraftRef.current = referenceDraft;
 
   const releasePointerCapture = (pointerId: number) => {
     const svg = svgRef.current;
@@ -278,6 +326,12 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       dispatch({ type: "CANCEL_TRANSACTION" });
     }
     if (interaction.type === "draw") setDraftBBox(null);
+    if (
+      interaction.type === "reference-move" ||
+      interaction.type === "reference-resize"
+    ) {
+      setReferenceDraft(null);
+    }
     interactionRef.current = null;
     interactionMovedRef.current = false;
     releasePointerCapture(interaction.pointerId);
@@ -554,6 +608,35 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       return;
     }
 
+    if (interaction.type === "reference-move") {
+      const point = viewportToImage(localPoint(event), transform);
+      const delta = {
+        x: point.x - interaction.startImage.x,
+        y: point.y - interaction.startImage.y,
+      };
+      if (delta.x !== 0 || delta.y !== 0) interactionMovedRef.current = true;
+      setReferenceDraft({
+        id: interaction.id,
+        bbox: moveBBox(interaction.startBBox, delta, {
+          width: image.width,
+          height: image.height,
+        }),
+      });
+      return;
+    }
+
+    if (interaction.type === "reference-resize") {
+      const bbox = resizeBBox(
+        interaction.startBBox,
+        interaction.handle,
+        viewportToImage(localPoint(event), transform),
+        { width: image.width, height: image.height },
+      );
+      interactionMovedRef.current = true;
+      setReferenceDraft({ id: interaction.id, bbox });
+      return;
+    }
+
     if (interaction.type === "draw") {
       const currentImage = viewportToImage(localPoint(event), transform);
       interactionRef.current = { ...interaction, currentImage };
@@ -608,6 +691,20 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
           suppressClickRef.current = false;
           suppressClickTimerRef.current = null;
         }, 0);
+      }
+    }
+    if (
+      event.type === "pointerup" &&
+      (interaction.type === "reference-move" ||
+        interaction.type === "reference-resize")
+    ) {
+      const draft = referenceDraftRef.current;
+      if (draft && interactionMovedRef.current) {
+        onReferenceChange?.(draft.id, draft.bbox);
+      }
+      setReferenceDraft(null);
+      if (!interactionMovedRef.current) {
+        onReferenceSelect?.(interaction.id);
       }
     }
     if (event.type === "pointercancel" && editsAnnotation) {
@@ -697,6 +794,56 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     dispatch({ type: "BEGIN_TRANSACTION" });
   };
 
+  // Reference boxes are only draggable while the originals are being edited.
+  const startReferenceMove = (
+    event: PointerEvent<SVGGElement>,
+    box: ReferenceBox,
+  ) => {
+    if (
+      !referenceEditing ||
+      event.button !== 0 ||
+      event.shiftKey ||
+      interactionRef.current !== null
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    blurActivePanelDraft();
+    interactionRef.current = {
+      type: "reference-move",
+      pointerId: event.pointerId,
+      id: box.id,
+      startImage: viewportToImage(localPoint(event), transform),
+      startBBox: box.bbox,
+    };
+    interactionMovedRef.current = false;
+    setReferenceDraft({ id: box.id, bbox: box.bbox });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+  };
+
+  const startReferenceResize = (
+    event: PointerEvent<SVGRectElement>,
+    box: ReferenceBox,
+    handle: ResizeHandle,
+  ) => {
+    if (!referenceEditing || event.button !== 0 || interactionRef.current !== null) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    interactionRef.current = {
+      type: "reference-resize",
+      pointerId: event.pointerId,
+      id: box.id,
+      handle,
+      startBBox: box.bbox,
+    };
+    interactionMovedRef.current = false;
+    setReferenceDraft({ id: box.id, bbox: box.bbox });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+  };
+
   return (
     <svg
       ref={svgRef}
@@ -735,6 +882,51 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
           aria-label={image.name}
           role="img"
         />
+        {referenceBoxes.length > 0 ? (
+          <g data-testid="reference-layer">
+            {referenceBoxes.map((box) => {
+              // An accepted original is represented by its own document box,
+              // except while the originals are being edited.
+              if (
+                !referenceEditing &&
+                (acceptedReferenceIds?.has(box.id) ?? false)
+              ) {
+                return null;
+              }
+              const draft =
+                referenceDraft?.id === box.id ? referenceDraft.bbox : box.bbox;
+              const selected =
+                referenceEditing && box.id === selectedReferenceId;
+              return (
+                <AnnotationBox
+                  key={box.id}
+                  variant="reference"
+                  annotation={{
+                    id: box.id,
+                    bbox: draft,
+                    label: box.label,
+                    reservedField: null,
+                  }}
+                  selected={selected}
+                  highlighted={false}
+                  scale={transform.scale}
+                  onSelect={(event) => {
+                    event.stopPropagation();
+                    if (referenceEditing) {
+                      onReferenceSelect?.(box.id);
+                      return;
+                    }
+                    onReferencePick?.(box.id);
+                  }}
+                  onPointerDown={(event) => startReferenceMove(event, box)}
+                  onResizePointerDown={(event, handle) =>
+                    startReferenceResize(event, box, handle)
+                  }
+                />
+              );
+            })}
+          </g>
+        ) : null}
         {renderedAnnotations.map((annotation) => (
           <AnnotationBox
             key={annotation.id}

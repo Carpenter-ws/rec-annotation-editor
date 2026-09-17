@@ -773,6 +773,120 @@ input,
   cursor: nwse-resize;
 }
 
+/* Original annotations: an untouched one is a grey dashed outline; accepting
+   it hands the box to the document, which draws it solid and cyan. */
+.reference-bbox {
+  /* Faintly filled rather than empty: the fill is what makes the whole box
+     clickable to accept it, not just its dashed edge. */
+  fill: rgb(148 163 184 / 5%);
+  stroke: #94a3b8;
+  stroke-width: 1.5;
+  stroke-dasharray: 7 5;
+  cursor: pointer;
+}
+
+.reference-bbox:hover {
+  fill: rgb(148 163 184 / 12%);
+  stroke: #e2e8f0;
+}
+
+.reference-bbox.is-selected {
+  fill: rgb(148 163 184 / 16%);
+  stroke: var(--selection);
+  stroke-width: 2;
+  stroke-dasharray: none;
+}
+
+.reference-bar {
+  position: absolute;
+  top: var(--space-sm);
+  left: 50%;
+  z-index: 11;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  max-width: calc(100% - 24px);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: rgb(255 255 255 / 96%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-panel);
+  transform: translateX(-50%);
+}
+
+.reference-bar.is-editing {
+  border-color: var(--selection);
+}
+
+.reference-count b {
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.reference-file {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-hint {
+  color: var(--text-muted);
+}
+
+.reference-selected {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.reference-selected-id {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.reference-selected label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reference-selected input {
+  width: 200px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--space-xs);
+}
+
+.reference-bar button {
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--space-xs);
+  cursor: pointer;
+}
+
+.reference-bar button:hover {
+  background: #fff;
+}
+
+.reference-edit-toggle[aria-pressed="true"] {
+  color: #111827;
+  background: var(--selection);
+  border-color: var(--selection);
+}
+
 .annotation-label-text {
   fill: var(--selection);
   paint-order: stroke;
