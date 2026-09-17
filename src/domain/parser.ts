@@ -51,6 +51,8 @@ export function parseAnnotationText(text: string): ParseResult {
       id: `ann_${String(annotations.length + 1).padStart(3, "0")}`,
       bbox: { x1, y1, x2, y2 },
       label,
+      // TXT lines carry no level at all.
+      level: null,
       reservedField: reserved ? "0" : null,
     });
   });

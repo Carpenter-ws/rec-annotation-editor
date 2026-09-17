@@ -604,6 +604,59 @@ it("ignores a rename of a missing expression or a same-name rename", () => {
   }
 });
 
+it("sets the level of a whole expression as one undo unit", () => {
+  const car: Annotation = { ...person, id: "ann_003", label: "car" };
+  const levelledPerson: Annotation = { ...person, level: "L1" };
+  const levelledSecond: Annotation = { ...secondPerson, level: "L1" };
+  const loaded = loadedState([levelledPerson, levelledSecond, car]);
+
+  const levelled = editorReducer(loaded, {
+    type: "SET_LABEL_LEVEL",
+    label: "person",
+    level: "L3",
+  });
+
+  expect(levelled.annotations.map(({ label, level }) => [label, level])).toEqual([
+    ["person", "L3"],
+    ["person", "L3"],
+    ["car", undefined],
+  ]);
+  expect(levelled.past).toEqual([[levelledPerson, levelledSecond, car]]);
+
+  const undone = editorReducer(levelled, { type: "UNDO" });
+  expect(undone.annotations.map(({ level }) => level)).toEqual([
+    "L1",
+    "L1",
+    undefined,
+  ]);
+  expect(undone.dirty).toBe(false);
+});
+
+it("clears a level back to none", () => {
+  const levelled = loadedState([{ ...person, level: "L2" }]);
+
+  const cleared = editorReducer(levelled, {
+    type: "SET_LABEL_LEVEL",
+    label: "person",
+    level: null,
+  });
+
+  expect(cleared.annotations[0]?.level).toBeNull();
+});
+
+it("ignores an unchanged level or a missing expression", () => {
+  const branched = stateWithRedoBranch();
+
+  for (const action of [
+    { type: "SET_LABEL_LEVEL", label: "person", level: null },
+    { type: "SET_LABEL_LEVEL", label: "missing", level: "L1" },
+  ] as const) {
+    const unchanged = editorReducer(branched, action);
+    expect(unchanged).toBe(branched);
+    expect(unchanged.future).toEqual([[{ ...person, label: "changed" }]]);
+  }
+});
+
 it("does not evict real bounded history with a same-value update", () => {
   let state = loadedState([person]);
 

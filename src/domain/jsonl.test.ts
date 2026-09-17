@@ -30,6 +30,7 @@ describe("parseJsonlAnnotations", () => {
       id: "ann_001",
       bbox: { x1: 3, y1: 46, x2: 117, y2: 62 },
       label: "the red-and-white boats",
+      level: "L1",
       reservedField: null,
     });
     expect(result.annotations[1]?.label).toBe("the red-and-white boats");
@@ -53,6 +54,7 @@ describe("parseJsonlAnnotations", () => {
         id: "ann_001",
         bbox: { x1: 501, y1: 582, x2: 568, y2: 650 },
         label: "the white boat with a mast",
+        level: null,
         reservedField: null,
       },
     ]);
@@ -103,6 +105,102 @@ describe("parseJsonlAnnotations", () => {
 
     expect(result.annotations).toEqual([]);
     expect(result.issues).toHaveLength(1);
+  });
+});
+
+describe("the level of an expression", () => {
+  it("keeps the level of its line on every one of its boxes", () => {
+    const result = parseJsonlAnnotations(
+      [
+        '{"expression": "boats", "level": "L2", "targets": [[1, 2, 3, 4], [5, 6, 7, 8]]}',
+        '{"expression": "masts", "targets": [[9, 10, 11, 12]]}',
+      ].join("\n"),
+    );
+
+    expect(result.issues).toEqual([]);
+    expect(
+      result.annotations.map(({ label, level }) => [label, level]),
+    ).toEqual([
+      ["boats", "L2"],
+      ["boats", "L2"],
+      ["masts", null],
+    ]);
+  });
+
+  it("regroups lines by expression and level so each keeps its own", () => {
+    const output = serializeAnnotationsJsonl([
+      {
+        id: "ann_001",
+        bbox: { x1: 1, y1: 2, x2: 3, y2: 4 },
+        label: "boats",
+        level: "L1",
+        reservedField: null,
+      },
+      {
+        id: "ann_002",
+        bbox: { x1: 5, y1: 6, x2: 7, y2: 8 },
+        label: "boats",
+        level: "L1",
+        reservedField: null,
+      },
+      {
+        id: "ann_003",
+        bbox: { x1: 9, y1: 10, x2: 11, y2: 12 },
+        label: "boats",
+        level: "L3",
+        reservedField: null,
+      },
+    ]);
+
+    expect(output.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
+      { expression: "boats", level: "L1", targets: [[1, 2, 3, 4], [5, 6, 7, 8]] },
+      { expression: "boats", level: "L3", targets: [[9, 10, 11, 12]] },
+    ]);
+  });
+
+  it("omits the level for documents that never carried one", () => {
+    const output = serializeAnnotationsJsonl([
+      {
+        id: "ann_001",
+        bbox: { x1: 1, y1: 2, x2: 3, y2: 4 },
+        label: "person",
+        reservedField: null,
+      },
+    ]);
+
+    expect(JSON.parse(output.trim())).toEqual({
+      expression: "person",
+      targets: [[1, 2, 3, 4]],
+    });
+  });
+
+  it("round-trips the three REC levels without touching them", () => {
+    const source = [
+      '{"expression": "a", "level": "L1", "targets": [[1, 2, 3, 4]]}',
+      '{"expression": "b", "level": "L2", "targets": [[5, 6, 7, 8]]}',
+      '{"expression": "c", "level": "L3", "targets": [[9, 10, 11, 12]]}',
+    ].join("\n");
+
+    const back = serializeAnnotationsJsonl(
+      parseJsonlAnnotations(source).annotations,
+    );
+
+    expect(back.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
+      { expression: "a", level: "L1", targets: [[1, 2, 3, 4]] },
+      { expression: "b", level: "L2", targets: [[5, 6, 7, 8]] },
+      { expression: "c", level: "L3", targets: [[9, 10, 11, 12]] },
+    ]);
+  });
+
+  it("treats an empty or non-string level as no level", () => {
+    const result = parseJsonlAnnotations(
+      [
+        '{"expression": "a", "level": "", "targets": [[1, 2, 3, 4]]}',
+        '{"expression": "b", "level": 2, "targets": [[5, 6, 7, 8]]}',
+      ].join("\n"),
+    );
+
+    expect(result.annotations.map(({ level }) => level)).toEqual([null, null]);
   });
 });
 

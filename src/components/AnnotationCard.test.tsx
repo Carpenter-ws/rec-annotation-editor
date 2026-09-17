@@ -469,6 +469,79 @@ it("unfolds a category only from the arrow left of its expression", async () => 
   expect(personCards()).toHaveLength(0);
 });
 
+it("shows the level of an expression and edits it for the whole category", async () => {
+  const user = userEvent.setup();
+  const dispatch = vi.fn();
+  render(
+    <AnnotationPanel
+      annotations={[
+        { ...annotation, level: "L1" },
+        { ...annotation, id: "ann_002", level: "L1" },
+        { ...annotation, id: "ann_003", label: "bicycle", level: "L2" },
+      ]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={dispatch}
+      onLocate={vi.fn()}
+    />,
+  );
+
+  const level = screen.getByLabelText('Level for "person"');
+  expect(level).toHaveValue("L1");
+  expect(screen.getByLabelText('Level for "bicycle"')).toHaveValue("L2");
+
+  await user.clear(level);
+  await user.type(level, "L3");
+  fireEvent.blur(level);
+
+  // One level for the expression, applied to all of its boxes at once.
+  expect(dispatch.mock.calls).toEqual([
+    [{ type: "SET_LABEL_LEVEL", label: "person", level: "L3" }],
+  ]);
+});
+
+it("keeps the level when the edit is dropped or emptied", async () => {
+  const user = userEvent.setup();
+  const dispatch = vi.fn();
+  render(
+    <AnnotationPanel
+      annotations={[{ ...annotation, level: "L1" }]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={dispatch}
+      onLocate={vi.fn()}
+    />,
+  );
+  const level = screen.getByLabelText('Level for "person"');
+
+  await user.clear(level);
+  await user.type(level, "L9");
+  fireEvent.keyDown(level, { key: "Escape" });
+  fireEvent.blur(level);
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(level).toHaveValue("L1");
+
+  await user.clear(level);
+  fireEvent.blur(level);
+  expect(dispatch.mock.calls).toEqual([
+    [{ type: "SET_LABEL_LEVEL", label: "person", level: null }],
+  ]);
+});
+
+it("shows an empty level for a document that carries none", () => {
+  render(
+    <AnnotationPanel
+      annotations={[annotation]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByLabelText('Level for "person"')).toHaveValue("");
+});
+
 it("offers deleting a whole expression from its header", async () => {
   const user = userEvent.setup();
   const onDeleteCategory = vi.fn();

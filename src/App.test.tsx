@@ -527,14 +527,19 @@ it("imports, edits, saves, and exports JSONL label files", async () => {
   // blobs[0] is the decoded image blob; the save download follows.
   const savedLines = (await readBlob(blobs[1]!)).trim().split("\n");
   expect(savedLines).toHaveLength(2);
+  // The level of each source line travels with its expression.
   expect(JSON.parse(savedLines[0]!)).toEqual({
     expression: "the orange boats",
+    level: "L1",
     targets: [
       [10, 20, 110, 120],
       [200, 210, 300, 310],
     ],
   });
-  expect(JSON.parse(savedLines[1]!).expression).toBe("the white boats");
+  expect(JSON.parse(savedLines[1]!)).toMatchObject({
+    expression: "the white boats",
+    level: "L2",
+  });
 
   await user.click(screen.getByRole("button", { name: "Export" }));
   await user.click(screen.getByRole("menuitem", { name: "Export JSONL" }));
@@ -543,6 +548,73 @@ it("imports, edits, saves, and exports JSONL label files", async () => {
     "aerial.jsonl",
   );
   expect(blobs[2]?.type).toBe("application/x-ndjson");
+});
+
+it("shows the REC level of each expression, edits it, and saves it back", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 1000, height: 800 }]);
+  mockViewportEnvironment();
+  const { blobs, click } = mockDownloadEnvironment();
+  await renderApp();
+
+  const jsonl = [
+    '{"expression": "the white boats", "level": "L1", "targets": [[10, 20, 110, 120]]}',
+    '{"expression": "boats with a canopy", "level": "L3", "targets": [[200, 210, 300, 310]]}',
+  ].join("\n");
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "aerial.jpg", { type: "image/jpeg" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile(jsonl, "aerial.jsonl"),
+  );
+  await showCards(user);
+
+  // Every expression shows the level its line carried.
+  expect(screen.getByLabelText('Level for "the white boats"')).toHaveValue("L1");
+  expect(screen.getByLabelText('Level for "boats with a canopy"')).toHaveValue(
+    "L3",
+  );
+
+  const level = screen.getByLabelText('Level for "the white boats"');
+  await user.clear(level);
+  await user.type(level, "L2");
+  fireEvent.blur(level);
+  expect(screen.getByLabelText("Save status")).toHaveTextContent(
+    "Unsaved changes",
+  );
+
+  // The level of a whole expression is a single history entry.
+  await user.click(screen.getByRole("button", { name: "Undo" }));
+  expect(screen.getByLabelText('Level for "the white boats"')).toHaveValue("L1");
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+
+  await user.clear(screen.getByLabelText('Level for "the white boats"'));
+  await user.type(screen.getByLabelText('Level for "the white boats"'), "L2");
+  fireEvent.blur(screen.getByLabelText('Level for "the white boats"'));
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+
+  const savedLines = (await readBlob(blobs[1]!))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  expect(savedLines).toHaveLength(2);
+  expect(
+    savedLines.map(
+      ({ expression, level: savedLevel }: { expression: string; level: string }) => [
+        expression,
+        savedLevel,
+      ],
+    ),
+  ).toEqual([
+    ["the white boats", "L2"],
+    ["boats with a canopy", "L3"],
+  ]);
+  // The untouched expression and its coordinates survive the round trip.
+  expect(savedLines[0].targets).toEqual([[10, 20, 110, 120]]);
+  expect(savedLines[1].targets).toEqual([[200, 210, 300, 310]]);
 });
 
 it("adds and selects a trimmed original-coordinate annotation without moving the view", async () => {
@@ -614,6 +686,7 @@ it("adds and selects a trimmed original-coordinate annotation without moving the
         id: "ann_001",
         bbox: { x1: 100, y1: 100, x2: 200, y2: 200 },
         label: "vehicle",
+        level: null,
         reservedField: "0",
       },
     },
@@ -1201,6 +1274,7 @@ it("keeps a canvas move, a rename, and a later rename in separate undo units", a
       id: "ann_001",
       bbox: { x1: 20, y1: 30, x2: 80, y2: 100 },
       label: "cart",
+      level: null,
       reservedField: "0",
     },
   ]);
@@ -1210,6 +1284,7 @@ it("keeps a canvas move, a rename, and a later rename in separate undo units", a
         id: "ann_001",
         bbox: { x1: 10, y1: 20, x2: 70, y2: 90 },
         label: "person",
+        level: null,
         reservedField: "0",
       },
     ],
@@ -1218,6 +1293,7 @@ it("keeps a canvas move, a rename, and a later rename in separate undo units", a
         id: "ann_001",
         bbox: { x1: 10, y1: 20, x2: 70, y2: 90 },
         label: "car",
+        level: null,
         reservedField: "0",
       },
     ],
@@ -1226,6 +1302,7 @@ it("keeps a canvas move, a rename, and a later rename in separate undo units", a
         id: "ann_001",
         bbox: { x1: 20, y1: 30, x2: 80, y2: 100 },
         label: "car",
+        level: null,
         reservedField: "0",
       },
     ],
@@ -1310,6 +1387,7 @@ it("preserves a focused numeric draft through a canvas move and commits it after
       id: "ann_001",
       bbox: { x1: 15, y1: 30, x2: 80, y2: 100 },
       label: "person",
+      level: null,
       reservedField: "0",
     },
   ]);
@@ -1319,6 +1397,7 @@ it("preserves a focused numeric draft through a canvas move and commits it after
         id: "ann_001",
         bbox: { x1: 10, y1: 20, x2: 70, y2: 90 },
         label: "person",
+        level: null,
         reservedField: "0",
       },
     ],
@@ -1327,6 +1406,7 @@ it("preserves a focused numeric draft through a canvas move and commits it after
         id: "ann_001",
         bbox: { x1: 20, y1: 30, x2: 80, y2: 100 },
         label: "person",
+        level: null,
         reservedField: "0",
       },
     ],
@@ -2641,6 +2721,7 @@ it("exports exact TXT and JSON snapshots without marking edits clean", async () 
         id: "ann_001",
         bbox: [10, 20, 30, 40],
         label: "delivery truck edited",
+        level: null,
         reservedField: "0",
       },
     ],

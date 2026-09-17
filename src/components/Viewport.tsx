@@ -74,12 +74,12 @@ function clampPanTransform(
   };
 }
 
-/** Commits a half-typed expression before a canvas gesture takes over. */
-function blurActiveExpressionEditor(): void {
+/** Commits a half-typed header draft before a canvas gesture takes over. */
+function blurActivePanelDraft(): void {
   const activeElement = document.activeElement;
   if (
     !(activeElement instanceof HTMLElement) ||
-    !activeElement.hasAttribute("data-expression-editor")
+    !activeElement.hasAttribute("data-panel-draft")
   ) {
     return;
   }
@@ -656,7 +656,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
-    blurActiveExpressionEditor();
+    blurActivePanelDraft();
     interactionRef.current = {
       type: "move",
       pointerId: event.pointerId,
@@ -684,7 +684,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
-    blurActiveExpressionEditor();
+    blurActivePanelDraft();
     interactionRef.current = {
       type: "resize",
       pointerId: event.pointerId,

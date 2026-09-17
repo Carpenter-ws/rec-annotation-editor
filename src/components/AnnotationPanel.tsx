@@ -43,6 +43,10 @@ interface LabelGroup {
   labelMatches: boolean;
 }
 
+/** The REC levels the shipped datasets use; the field stays free-text. */
+const LEVEL_OPTIONS_ID = "annotation-level-options";
+const LEVEL_OPTIONS = ["L1", "L2", "L3"];
+
 export function AnnotationPanel({
   annotations,
   selectedId,
@@ -69,10 +73,16 @@ export function AnnotationPanel({
     from: string;
     value: string;
   } | null>(null);
+  /** Level being retyped on a header, committed for the whole category. */
+  const [levelDraft, setLevelDraft] = useState<{
+    from: string;
+    value: string;
+  } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const scrolledForIdRef = useRef<string | null>(null);
   /** Committed exactly once, even when Enter is followed by a blur. */
   const draftRef = useRef<{ from: string; value: string } | null>(null);
+  const levelDraftRef = useRef<{ from: string; value: string } | null>(null);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const annotationEntries = useMemo(
@@ -184,6 +194,25 @@ export function AnnotationPanel({
     onRenameCategory?.(draft.from, nextLabel);
   }, [dropRenameDraft, onRenameCategory]);
 
+  // The level belongs to the expression too: it is edited on the header and
+  // written to every box of that category in one step.
+  const dropLevelDraft = useCallback(() => {
+    levelDraftRef.current = null;
+    setLevelDraft(null);
+  }, []);
+
+  const commitLevel = useCallback(() => {
+    const draft = levelDraftRef.current;
+    dropLevelDraft();
+    if (!draft) return;
+    const level = draft.value.trim();
+    dispatch({
+      type: "SET_LABEL_LEVEL",
+      label: draft.from,
+      level: level === "" ? null : level,
+    });
+  }, [dispatch, dropLevelDraft]);
+
   // Activation replaces the hover preview, so clicking a category and clicking
   // it again really does show and then hide its boxes. It deliberately leaves
   // the panel folded: unfolding belongs to the arrow left of the expression.
@@ -282,6 +311,13 @@ export function AnnotationPanel({
         ) : null}
       </div>
       {visibleGroups.length > 0 ? (
+        <datalist id={LEVEL_OPTIONS_ID}>
+          {LEVEL_OPTIONS.map((level) => (
+            <option key={level} value={level} />
+          ))}
+        </datalist>
+      ) : null}
+      {visibleGroups.length > 0 ? (
         <div className="annotation-groups">
           {visibleGroups.flatMap(({ group, visibleEntries }) => {
             // While searching, matching categories show their cards right away.
@@ -314,7 +350,7 @@ export function AnnotationPanel({
                     rows={1}
                     ref={sizeExpressionEditor}
                     className="annotation-group-expression"
-                    data-expression-editor="true"
+                    data-panel-draft="expression"
                     aria-label="Expression"
                     title="Renames every box of this expression"
                     value={renameDraft.value}
@@ -355,6 +391,40 @@ export function AnnotationPanel({
                 <span className="annotation-group-count">
                   {group.entries.length}
                 </span>
+                <input
+                  type="text"
+                  list={LEVEL_OPTIONS_ID}
+                  className="annotation-group-level"
+                  data-panel-draft="level"
+                  aria-label={`Level for "${group.label}"`}
+                  title={`REC level of every "${group.label}" box`}
+                  placeholder="L?"
+                  value={
+                    levelDraft?.from === group.label
+                      ? levelDraft.value
+                      : group.entries[0]?.annotation.level ?? ""
+                  }
+                  onChange={(event) => {
+                    levelDraftRef.current = {
+                      from: group.label,
+                      value: event.currentTarget.value,
+                    };
+                    setLevelDraft(levelDraftRef.current);
+                  }}
+                  onBlur={commitLevel}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      dropLevelDraft();
+                      event.currentTarget.blur();
+                      return;
+                    }
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    commitLevel();
+                    event.currentTarget.blur();
+                  }}
+                />
                 {onRenameCategory && renameDraft?.from !== group.label ? (
                   <button
                     type="button"

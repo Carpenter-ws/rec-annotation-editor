@@ -34,10 +34,11 @@ export function serializeDocumentJson(document: AnnotationDocument): string {
         width: document.image?.width ?? null,
         height: document.image?.height ?? null,
         annotations: document.annotations.map(
-          ({ id, bbox, label, reservedField }) => ({
+          ({ id, bbox, label, level, reservedField }) => ({
             id,
             bbox: [bbox.x1, bbox.y1, bbox.x2, bbox.y2],
             label,
+            level: level ?? null,
             reservedField,
           }),
         ),

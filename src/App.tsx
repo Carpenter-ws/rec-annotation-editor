@@ -77,7 +77,7 @@ interface ErrorReport {
 
 /**
  * Commits a half-typed draft before a global action takes over: a box coordinate
- * inside a card, or the expression of a category on its header. Returns whether
+ * inside a card, or an expression/level on a category header. Returns whether
  * anything was blurred, so callers can run their action after the commit.
  */
 function blurPendingDraft(): boolean {
@@ -90,7 +90,7 @@ function blurPendingDraft(): boolean {
   }
   if (
     activeElement.closest("[data-annotation-id]") === null &&
-    !activeElement.hasAttribute("data-expression-editor")
+    !activeElement.hasAttribute("data-panel-draft")
   ) {
     return false;
   }
@@ -292,9 +292,14 @@ function EditorWorkspace(): JSX.Element {
   const addAnnotation = useCallback(
     (bbox: BBox, label: string) => {
       const id = nextAnnotationId(stateRef.current.nextAnnotationNumber);
+      // A new box joins the expression it names, level included.
+      const level =
+        stateRef.current.annotations.find(
+          (annotation) => annotation.label === label,
+        )?.level ?? null;
       dispatch({
         type: "ADD_ANNOTATION",
-        annotation: { id, bbox, label, reservedField: "0" },
+        annotation: { id, bbox, label, level, reservedField: "0" },
       });
       dispatch({ type: "SELECT", id });
       // Deliberately no camera movement: the view stays where the user drew.

@@ -60,6 +60,9 @@ lives:
      instead of being cut off — plus how many boxes share it. The cards below
      carry only coordinates: an expression belongs to the category, never to a
      single box;
+   - the small box after the box count is the **level** of that expression
+     (`L1`/`L2`/`L3` are offered as suggestions). Retyping it applies to every
+     box of the category as one undo step, and emptying it clears the level;
    - **Edit** next to a category header retypes its expression in place: every
      box of that category is renamed at once, as one undo step. `Enter` or a
      click elsewhere commits, `Esc` drops the draft, and the field grows with
@@ -192,10 +195,19 @@ Targets are **normalized integers on a [0, 1000] grid**, not pixels:
   `round(pixel / size × 1000)`, clamped to `[0, 1000]` and kept non-degenerate
   so the file stays valid
 
+The `level` field is the **level of the expression**, so it is read from the
+line, shown on that category's header in the panel, and written back with it:
+
+- every box of the line gets the same level; the header field (`L1`/`L2`/`L3`
+  suggestions, free text) sets it for the whole category at once, as one undo
+  step, and an emptied field writes no level at all
+- export regroups boxes by **expression and level**, so two levels of the same
+  expression stay two lines
+- a file that never carried levels is written back without the field, and TXT
+  documents have no level to begin with
+
 Every target becomes one box sharing the expression; boxes that share a label
-are regrouped into one `targets` line on export. The auxiliary `level` field is
-not preserved by the editor (per-box metadata is out of scope) — keep a backup
-of the original file if `level` matters.
+and a level are regrouped into one `targets` line on export.
 
 ## Label formats
 

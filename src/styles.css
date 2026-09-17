@@ -947,6 +947,33 @@ input,
   margin-top: 2px;
 }
 
+.annotation-group-level {
+  flex-shrink: 0;
+  width: 42px;
+  margin-top: 2px;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--space-xs);
+}
+
+.annotation-group-level::placeholder {
+  font-weight: 400;
+  color: #b8c2cf;
+}
+
+.annotation-group-level:focus-visible {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: 2px solid rgb(14 165 183 / 35%);
+  outline-offset: 1px;
+}
+
 .annotation-group-edit {
   flex-shrink: 0;
   padding: 2px 6px;

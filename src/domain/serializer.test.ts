@@ -65,4 +65,18 @@ describe("serializeDocumentJson", () => {
       annotations: [{ id: "ann_001", label: "the red car near the truck" }],
     });
   });
+
+  it("carries the level of each box into the exported JSON", () => {
+    const json = JSON.parse(
+      serializeDocumentJson({
+        ...document,
+        annotations: [{ ...annotation, level: "L2" }, annotation],
+      }),
+    );
+
+    expect(json.annotations.map((item: { level: string | null }) => item.level)).toEqual([
+      "L2",
+      null,
+    ]);
+  });
 });

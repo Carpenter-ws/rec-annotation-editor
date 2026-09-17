@@ -4,6 +4,8 @@ type JsonlBox = [number, number, number, number];
 
 interface JsonlLine {
   expression: string;
+  /** REC level of the line; `null` when the file omits it. */
+  level: string | null;
   targets: JsonlBox[];
 }
 
@@ -120,7 +122,8 @@ function parseLine(source: string): JsonlLine | ParseIssue {
   if (targets === null || targets.length === 0) {
     return { line: 0, reason: "invalid bounding box", source };
   }
-  return { expression, targets };
+  const rawLevel = typeof record.level === "string" ? record.level.trim() : "";
+  return { expression, level: rawLevel || null, targets };
 }
 
 export function parseJsonlAnnotations(
@@ -159,6 +162,7 @@ export function parseJsonlAnnotations(
         id: `ann_${String(annotations.length + 1).padStart(3, "0")}`,
         bbox,
         label: line.expression,
+        level: line.level,
         reservedField: null,
       });
     }
@@ -168,25 +172,33 @@ export function parseJsonlAnnotations(
 }
 
 /**
- * Inverse of the parser: boxes sharing a label are regrouped into one line
- * with a targets array, preserving first-appearance order of each label.
+ * Inverse of the parser: boxes sharing a label *and* a level are regrouped into
+ * one line with a targets array, preserving first-appearance order. The level is
+ * written back per line and omitted entirely for documents that never had one.
  */
 export function serializeAnnotationsJsonl(
   annotations: readonly Annotation[],
   scale?: JsonlScale | null,
 ): string {
-  const grouped = new Map<string, JsonlBox[]>();
-  for (const { bbox, label } of annotations) {
-    const targets = grouped.get(label);
+  const grouped = new Map<string, { expression: string; level: string | null; targets: JsonlBox[] }>();
+  for (const { bbox, label, level } of annotations) {
+    const resolved = level ?? null;
+    const key = `${label}\u0000${resolved ?? ""}`;
     const box: JsonlBox = scale
       ? pixelBoxToNormalized(bbox, scale)
       : [bbox.x1, bbox.y1, bbox.x2, bbox.y2];
-    if (targets) targets.push(box);
-    else grouped.set(label, [box]);
+    const group = grouped.get(key);
+    if (group) group.targets.push(box);
+    else
+      grouped.set(key, { expression: label, level: resolved, targets: [box] });
   }
 
-  const lines = [...grouped.entries()].map(([expression, targets]) =>
-    JSON.stringify({ expression, targets }),
+  const lines = [...grouped.values()].map(({ expression, level, targets }) =>
+    JSON.stringify(
+      level === null
+        ? { expression, targets }
+        : { expression, level, targets },
+    ),
   );
   return lines.length ? `${lines.join("\n")}\n` : "";
 }

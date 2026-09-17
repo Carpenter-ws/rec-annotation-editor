@@ -48,6 +48,7 @@ export type EditorAction =
   | { type: "DELETE_ANNOTATION"; id: string }
   | { type: "DELETE_LABEL"; label: string }
   | { type: "RENAME_LABEL"; label: string; nextLabel: string }
+  | { type: "SET_LABEL_LEVEL"; label: string; level: string | null }
   | { type: "UNDO" }
   | { type: "REDO" }
   | { type: "MARK_SAVED" };
@@ -301,6 +302,25 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           : annotation,
       );
       return commitAtomicEdit(resolved, renamed);
+    }
+
+    case "SET_LABEL_LEVEL": {
+      const resolved = resolveTransaction(state);
+      const targets = resolved.annotations.filter(
+        (annotation) => annotation.label === action.label,
+      );
+      if (targets.length === 0) return resolved;
+      // A level belongs to the expression, so it is set on all of its boxes at
+      // once and recorded as a single history entry.
+      if (targets.every(({ level }) => (level ?? null) === action.level)) {
+        return resolved;
+      }
+      const levelled = resolved.annotations.map((annotation) =>
+        annotation.label === action.label
+          ? { ...annotation, level: action.level }
+          : annotation,
+      );
+      return commitAtomicEdit(resolved, levelled);
     }
 
     case "UNDO": {

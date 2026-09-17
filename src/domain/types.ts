@@ -9,6 +9,12 @@ export interface Annotation {
   id: string;
   bbox: BBox;
   label: string;
+  /**
+   * REC "level" of the expression this box belongs to (`L1`/`L2`/`L3` in the
+   * shipped datasets). It comes from a JSONL line, so every box of the same
+   * expression shares it; TXT documents have none.
+   */
+  level?: string | null;
   reservedField: "0" | null;
 }
 

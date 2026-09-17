@@ -11,6 +11,8 @@ describe("parseAnnotationText", () => {
       id: "ann_001",
       bbox: { x1: 855.04, y1: 544.45, x2: 970.75, y2: 724.67 },
       label: "the red car near the truck",
+      // TXT lines have no level; JSONL is the only carrier.
+      level: null,
       reservedField: "0",
     });
   });
