@@ -34,6 +34,26 @@ async function stepImage(
   await expandCategories(page);
 }
 
+/** The expression of a category, shown on its header instead of on each box. */
+function expressionButton(page: import("@playwright/test").Page, label: string) {
+  return page.getByRole("button", { name: label, exact: true });
+}
+
+/**
+ * Retypes a category expression, which renames every box of that category.
+ * Editing is its own control, so picking the expression stays selection-only.
+ */
+async function renameCategory(
+  page: import("@playwright/test").Page,
+  from: string,
+  to: string,
+) {
+  await page.getByRole("button", { name: `Edit "${from}" expression` }).click();
+  const editor = page.getByRole("textbox", { name: "Expression" });
+  await editor.fill(to);
+  await editor.blur();
+}
+
 test("switches between images of one dataset", async ({ page }) => {
   test.setTimeout(90000);
   await page.request.delete("/api/datasets/e2e-nav");
@@ -77,39 +97,36 @@ test("switches between images of one dataset", async ({ page }) => {
 
   // The canvas re-enters the dataset on the first imported image.
   const position = page.getByTestId("dataset-position");
-  const firstCard = page.locator('[data-annotation-id="ann_001"]');
   await expect(position).toHaveText("1 / 3");
   await expandCategories(page);
-  await expect(firstCard.getByLabel("Expression")).toHaveValue("person");
+  await expect(expressionButton(page, "person")).toBeVisible();
 
   // Step to the second item, then back with the toolbar buttons.
   await stepImage(page, "Next image");
   await expect(position).toHaveText("2 / 3");
-  await expect(firstCard.getByLabel("Expression")).toHaveValue("vehicle");
+  await expect(expressionButton(page, "vehicle")).toBeVisible();
 
   await stepImage(page, "Previous image");
   await expect(position).toHaveText("1 / 3");
   await expect(page.getByRole("button", { name: "Previous image" })).toBeDisabled();
-  await expect(firstCard.getByLabel("Expression")).toHaveValue("person");
+  await expect(expressionButton(page, "person")).toBeVisible();
 
   // Unsaved edits are protected before switching.
-  await firstCard.getByLabel("Expression").fill("draft change");
-  await firstCard.getByLabel("Expression").blur();
+  await renameCategory(page, "person", "draft change");
   await page.getByRole("button", { name: "Next image" }).click();
   const confirm = page.getByRole("dialog", { name: "Discard unsaved changes?" });
   await expect(confirm).toBeVisible();
   await expect(position).toHaveText("1 / 3");
   await page.getByRole("button", { name: "Keep editing" }).click();
   await expect(confirm).not.toBeVisible();
-  await expect(firstCard.getByLabel("Expression")).toHaveValue("draft change");
+  await expect(expressionButton(page, "draft change")).toBeVisible();
 
   // Discarding really switches, and saving targets the open item's labels.
   await page.getByRole("button", { name: "Next image" }).click();
   await page.getByRole("button", { name: "Discard and switch" }).click();
   await expect(position).toHaveText("2 / 3");
   await expandCategories(page);
-  await firstCard.getByLabel("Expression").fill("vehicle edited for e2e");
-  await firstCard.getByLabel("Expression").blur();
+  await renameCategory(page, "vehicle", "vehicle edited for e2e");
   await page.getByRole("button", { name: /^Save$/ }).click();
   await expect(page.getByTestId("editor-notice")).toContainText(
     '"nav-two.txt"',
@@ -179,10 +196,7 @@ test("persists a dataset across page reloads", async ({ page }) => {
   await expect(page.getByLabel("Save status")).toContainText("Saved");
 
   // Edits persist back into the stored dataset.
-  const firstCard = page.locator('[data-annotation-id="ann_001"]');
-  const expression = firstCard.getByLabel("Expression");
-  await expression.fill("person edited for e2e");
-  await expression.blur();
+  await renameCategory(page, "person", "person edited for e2e");
   await page.getByRole("button", { name: /^Save$/ }).click();
   await expect(page.getByTestId("editor-notice")).toContainText(
     'dataset "e2e-dataset"',
@@ -199,9 +213,7 @@ test("persists a dataset across page reloads", async ({ page }) => {
   await card.click();
   await expandCategories(page);
   await expect(cards).toHaveCount(24);
-  await expect(
-    page.locator('[data-annotation-id="ann_001"]').getByLabel("Expression"),
-  ).toHaveValue("person edited for e2e");
+  await expect(expressionButton(page, "person edited for e2e")).toBeVisible();
   await expect(page.getByLabel("Save status")).toContainText("Saved");
 
   // Back home, delete the dataset from its card.

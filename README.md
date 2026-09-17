@@ -57,13 +57,20 @@ lives:
 3. Edit on the canvas or in the right-hand panel:
    - the panel groups cards by their text label: each category header shows the
      **full expression** — long ones wrap over as many lines as they need
-     instead of being cut off — plus how many boxes share it;
+     instead of being cut off — plus how many boxes share it. The cards below
+     carry only coordinates: an expression belongs to the category, never to a
+     single box;
+   - **Edit** next to a category header retypes its expression in place: every
+     box of that category is renamed at once, as one undo step. `Enter` or a
+     click elsewhere commits, `Esc` drops the draft, and the field grows with
+     the wrapped text;
    - **categories start collapsed**, so a document opens as a readable list of
      expressions. Reveal one with the small arrow left of its text, or with
      **Expand all** / **Collapse all**; searching shows the matching cards right
      away, and the category of a selected box always opens itself. Clicking the
-     expression text itself only isolates it on the canvas — it never unfolds
-     the panel, and the blank space right of the text does nothing;
+     expression text itself only selects it on the canvas — it never unfolds the
+     panel and never opens an editor, and the blank space right of the text does
+     nothing;
    - **the canvas starts clean**: no boxes are drawn until an expression is
      picked, so a crowded image is readable from the first second;
    - hover a category to **preview** all of its boxes; click a category to

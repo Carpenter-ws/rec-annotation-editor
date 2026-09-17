@@ -61,6 +61,60 @@ async function showCardsWhenReady(
   if (expand) await user.click(expand);
 }
 
+/** Cards rendered for a category, which proves that it is unfolded. */
+const openCards = (label: string): NodeListOf<Element> =>
+  document.querySelectorAll(
+    `.annotation-group-card[data-group-label="${label}"] > [data-annotation-id]`,
+  );
+
+/**
+ * Renames a whole category the way the panel offers it: the expression lives on
+ * the category header, and every box of that category follows it.
+ */
+async function renameCategory(
+  user: ReturnType<typeof userEvent.setup>,
+  from: string,
+  to: string,
+): Promise<void> {
+  await user.click(
+    screen.getByRole("button", { name: `Edit "${from}" expression` }),
+  );
+  const editor = screen.getByRole("textbox", { name: "Expression" });
+  await user.clear(editor);
+  await user.type(editor, to);
+  fireEvent.blur(editor);
+}
+
+/** Isolates a category, exactly like clicking its expression does. */
+async function isolateCategory(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+): Promise<void> {
+  await user.click(screen.getByRole("button", { name: label }));
+}
+
+/** Retypes the expression of the document's first category. */
+async function retypeFirstCategory(
+  user: ReturnType<typeof userEvent.setup>,
+  nextLabel: string,
+): Promise<void> {
+  const header = document.querySelector<HTMLElement>(".annotation-group-header");
+  await renameCategory(user, header?.dataset.groupLabel ?? "", nextLabel);
+}
+
+/**
+ * Appends a suffix to the expression of the document's first category, the way
+ * a test used to append to the expression field of its only box.
+ */
+async function appendToFirstCategory(
+  user: ReturnType<typeof userEvent.setup>,
+  suffix: string,
+): Promise<void> {
+  const header = document.querySelector<HTMLElement>(".annotation-group-header");
+  const label = header?.dataset.groupLabel ?? "";
+  await renameCategory(user, label, `${label}${suffix}`);
+}
+
 /**
  * Paging to another item loads a new document whose categories start collapsed
  * again, so reveal them after the switch.
@@ -461,13 +515,9 @@ it("imports, edits, saves, and exports JSONL label files", async () => {
     ),
   ).toHaveLength(2);
 
-  const expression = within(
-    panel.querySelector('[data-annotation-id="ann_001"]')!,
-  ).getByRole("textbox", { name: "Expression" });
-  await user.click(expression);
-  await user.clear(expression);
-  await user.type(expression, "the orange boats");
-  fireEvent.blur(expression);
+  // Renaming the category retypes both of its boxes, so saving regroups them
+  // under the new expression.
+  await renameCategory(user, "the red-and-white boats", "the orange boats");
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
   await waitFor(() => expect(click).toHaveBeenCalledOnce());
@@ -476,15 +526,15 @@ it("imports, edits, saves, and exports JSONL label files", async () => {
   );
   // blobs[0] is the decoded image blob; the save download follows.
   const savedLines = (await readBlob(blobs[1]!)).trim().split("\n");
+  expect(savedLines).toHaveLength(2);
   expect(JSON.parse(savedLines[0]!)).toEqual({
     expression: "the orange boats",
-    targets: [[10, 20, 110, 120]],
+    targets: [
+      [10, 20, 110, 120],
+      [200, 210, 300, 310],
+    ],
   });
-  expect(JSON.parse(savedLines[1]!)).toEqual({
-    expression: "the red-and-white boats",
-    targets: [[200, 210, 300, 310]],
-  });
-  expect(JSON.parse(savedLines[2]!).expression).toBe("the white boats");
+  expect(JSON.parse(savedLines[1]!).expression).toBe("the white boats");
 
   await user.click(screen.getByRole("button", { name: "Export" }));
   await user.click(screen.getByRole("menuitem", { name: "Export JSONL" }));
@@ -967,11 +1017,14 @@ it("lists label-only imports but disables bbox editing without image bounds", as
   );
   await showCards(user);
 
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  expect(expression).toHaveValue("person");
-  expect(expression).toBeEnabled();
+  // The expression is still retypable without an image; only the boxes lock.
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
+  const editor = screen.getByRole("textbox", { name: "Expression" });
+  expect(editor).toHaveValue("person");
+  expect(editor).toBeEnabled();
+  await user.keyboard("{Escape}");
   for (const name of ["X1", "Y1", "X2", "Y2"]) {
     expect(screen.getByRole("textbox", { name })).toBeDisabled();
   }
@@ -993,7 +1046,7 @@ it("centers the viewport on the exact annotation clicked in the panel", async ()
     textFile("10 20 70 90 person 0"),
   );
   await showCards(user);
-  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  await waitFor(() => expect(openCards("person").length).toBeGreaterThan(0));
   const imageSpace = screen.getByTestId("image-space");
   const startingOffsetX = Number(imageSpace.getAttribute("data-offset-x"));
 
@@ -1039,7 +1092,7 @@ it("highlights and scrolls the exact card selected from a duplicate-label bbox",
       textFile("10 20 70 90 person 0\n100 110 180 200 person 0"),
     );
   await showCards(user);
-    expect(await screen.findAllByDisplayValue("person")).toHaveLength(2);
+    await waitFor(() => expect(openCards("person")).toHaveLength(2));
     const cards = [
       ...screen
         .getByRole("complementary", { name: "Annotations" })
@@ -1047,7 +1100,7 @@ it("highlights and scrolls the exact card selected from a duplicate-label bbox",
     ];
 
     // The box has to be on the canvas before it can be clicked.
-    await user.click(screen.getByText("person", { exact: true }));
+    await isolateCategory(user, "person");
     fireEvent.click(screen.getByTestId("bbox-ann_002"));
 
     expect(cards[0]).not.toHaveAttribute("aria-current");
@@ -1068,7 +1121,7 @@ it("highlights and scrolls the exact card selected from a duplicate-label bbox",
   }
 });
 
-it("separates a focused expression edit, canvas move, and later expression edit into undo units", async () => {
+it("keeps a canvas move, a rename, and a later rename in separate undo units", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
@@ -1085,9 +1138,11 @@ it("separates a focused expression edit, canvas move, and later expression edit 
     textFile("10 20 70 90 person 0"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
+  await isolateCategory(user, "person");
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
+  const expression = screen.getByRole("textbox", { name: "Expression" });
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
     setPointerCapture: vi.fn(),
@@ -1096,7 +1151,8 @@ it("separates a focused expression edit, canvas move, and later expression edit 
   });
   reducer.mockClear();
 
-  await user.click(expression);
+  // Retype the category, then move its box with the pointer: the canvas gesture
+  // commits the rename first and opens its own bbox transaction.
   await user.clear(expression);
   await user.type(expression, "car");
   fireEvent.pointerDown(screen.getByTestId("bbox-ann_001"), {
@@ -1115,9 +1171,7 @@ it("separates a focused expression edit, canvas move, and later expression edit 
     clientX: 30,
     clientY: 40,
   });
-  await user.click(expression);
-  await user.type(expression, "t");
-  fireEvent.blur(expression);
+  await renameCategory(user, "car", "cart");
 
   const transactionActions = reducer.mock.calls
     .map(([, action]) => action)
@@ -1136,16 +1190,7 @@ it("separates a focused expression edit, canvas move, and later expression edit 
     );
   expect(transactionActions).toEqual([
     "BEGIN_TRANSACTION",
-    "PREVIEW_LABEL",
-    "PREVIEW_LABEL",
-    "PREVIEW_LABEL",
-    "PREVIEW_LABEL",
-    "COMMIT_TRANSACTION",
-    "BEGIN_TRANSACTION",
     "PREVIEW_BBOX",
-    "COMMIT_TRANSACTION",
-    "BEGIN_TRANSACTION",
-    "PREVIEW_LABEL",
     "COMMIT_TRANSACTION",
   ]);
 
@@ -1733,12 +1778,7 @@ it("saves edited TXT with a deterministic label stem and marks that snapshot cle
     textFile("0 0 10 10 person 0", "aerial.scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.clear(expression);
-  await user.type(expression, "edited person");
-  fireEvent.blur(expression);
+  await renameCategory(user, "person", "edited person");
 
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
@@ -1809,12 +1849,7 @@ it("retains a valid picker label handle and uses it for Save", async () => {
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await showCardsWhenReady(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.clear(expression);
-  await user.type(expression, "saved through handle");
-  fireEvent.blur(expression);
+  await retypeFirstCategory(user, "saved through handle");
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
@@ -1849,11 +1884,7 @@ it("clears the retained handle after a valid hidden-input label import", async (
     textFile("0 0 10 10 replacement label 0", "replacement.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
@@ -1887,11 +1918,7 @@ it("clears the retained handle after a valid dropped label import", async () => 
     },
   });
   await showCardsWhenReady(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
@@ -2129,11 +2156,7 @@ it("surfaces save failures without marking edited annotations clean", async () =
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await showCardsWhenReady(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
   );
@@ -2163,11 +2186,7 @@ it("keeps retained-handle AbortError cancellation silent and dirty", async () =>
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await showCardsWhenReady(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
@@ -2192,11 +2211,7 @@ it("saves through Save As and marks the written annotation snapshot clean", asyn
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   await user.click(screen.getByRole("button", { name: "Save As" }));
 
@@ -2221,11 +2236,7 @@ it("falls back to a Save As download and marks the downloaded snapshot clean", a
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   await user.click(screen.getByRole("button", { name: "Save As" }));
 
@@ -2249,11 +2260,7 @@ it("keeps Save As cancellation silent without marking edits clean", async () => 
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   await user.click(screen.getByRole("button", { name: "Save As" }));
 
@@ -2276,11 +2283,7 @@ it("surfaces Save As failures without marking edited annotations clean", async (
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   await user.click(screen.getByRole("button", { name: "Save As" }));
 
@@ -2310,17 +2313,11 @@ it("does not mark newer edits clean when an older Save finishes", async () => {
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await showCardsWhenReady(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " first");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " first");
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
   await waitFor(() => expect(write).toHaveBeenCalledOnce());
 
-  await user.click(expression);
-  await user.type(expression, " newer");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " newer");
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
   );
@@ -2329,7 +2326,7 @@ it("does not mark newer edits clean when an older Save finishes", async () => {
   expect(write).toHaveBeenCalledWith(
     "0.00 0.00 10.00 10.00 person first 0\n",
   );
-  expect(screen.getByDisplayValue("person first newer")).toBeVisible();
+  expect(openCards("person first newer").length).toBeGreaterThan(0);
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
   );
@@ -2355,23 +2352,17 @@ it("does not mark newer edits clean when an older Save As finishes", async () =>
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " first");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " first");
   await user.click(screen.getByRole("button", { name: "Save As" }));
   await waitFor(() => expect(write).toHaveBeenCalledOnce());
 
-  await user.click(expression);
-  await user.type(expression, " newer");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " newer");
   await settleDeferred(() => pendingWrite.resolve());
 
   expect(write).toHaveBeenCalledWith(
     "0.00 0.00 10.00 10.00 person first 0\n",
   );
-  expect(screen.getByDisplayValue("person first newer")).toBeVisible();
+  expect(openCards("person first newer").length).toBeGreaterThan(0);
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
   );
@@ -2404,6 +2395,9 @@ it("maps editor history and delete shortcuts while protecting editable fields", 
   expect(screen.getByText("0 annotations")).toBeVisible();
 
   fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
   const expression = screen.getByRole("textbox", { name: "Expression" });
   act(() => expression.focus());
   expect(expression).toHaveFocus();
@@ -2412,7 +2406,7 @@ it("maps editor history and delete shortcuts while protecting editable fields", 
   expect(screen.getByText("1 annotation")).toBeVisible();
 });
 
-it("commits a focused expression transaction before shortcut Undo", async () => {
+it("commits a focused rename before shortcut Undo", async () => {
   const reducer = vi.spyOn(editorReducerModule, "editorReducer");
   const user = userEvent.setup();
   await renderApp();
@@ -2422,23 +2416,25 @@ it("commits a focused expression transaction before shortcut Undo", async () => 
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.click(expression);
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
+  const expression = screen.getByRole("textbox", { name: "Expression" });
   await user.clear(expression);
   await user.type(expression, "vehicle");
   reducer.mockClear();
 
   fireEvent.keyDown(expression, { key: "z", ctrlKey: true });
 
-  await waitFor(() => expect(expression).toHaveValue("person"));
-  expect(expression).not.toHaveFocus();
+  // The rename commits first, the shortcut then undoes it.
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "person" })).toBeVisible(),
+  );
   expect(
     reducer.mock.calls
       .map(([, action]) => action.type)
-      .filter((type) => ["COMMIT_TRANSACTION", "UNDO"].includes(type)),
-  ).toEqual(["COMMIT_TRANSACTION", "UNDO"]);
+      .filter((type) => ["RENAME_LABEL", "UNDO"].includes(type)),
+  ).toEqual(["RENAME_LABEL", "UNDO"]);
 });
 
 it("commits a focused numeric draft before shortcut Undo", async () => {
@@ -2485,10 +2481,10 @@ it("commits a focused expression transaction before shortcut Save", async () => 
     textFile("0 0 10 10 person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.click(expression);
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
+  const expression = screen.getByRole("textbox", { name: "Expression" });
   await user.clear(expression);
   await user.type(expression, "delivery vehicle");
   reducer.mockClear();
@@ -2499,12 +2495,14 @@ it("commits a focused expression transaction before shortcut Save", async () => 
   expect(await readBlob(blobs[0]!)).toBe(
     "0.00 0.00 10.00 10.00 delivery vehicle 0\n",
   );
-  expect(expression).not.toHaveFocus();
+  expect(
+    screen.getByRole("button", { name: "delivery vehicle" }),
+  ).toBeVisible();
   expect(
     reducer.mock.calls
       .map(([, action]) => action.type)
-      .filter((type) => ["COMMIT_TRANSACTION", "MARK_SAVED"].includes(type)),
-  ).toEqual(["COMMIT_TRANSACTION", "MARK_SAVED"]);
+      .filter((type) => ["RENAME_LABEL", "MARK_SAVED"].includes(type)),
+  ).toEqual(["RENAME_LABEL", "MARK_SAVED"]);
 });
 
 it("commits a focused numeric draft before shortcut Save", async () => {
@@ -2560,27 +2558,25 @@ it("exposes disabled-aware Undo and Redo toolbar controls", async () => {
   expect(undo).toBeDisabled();
   expect(redo).toBeDisabled();
 
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.click(expression);
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
+  const expression = screen.getByRole("textbox", { name: "Expression" });
+  // An open rename draft is not history yet.
   expect(undo).toBeDisabled();
-  await user.type(expression, " edited");
+  await user.clear(expression);
+  await user.type(expression, "person edited");
   fireEvent.blur(expression);
   expect(undo).toBeEnabled();
   expect(redo).toBeDisabled();
 
   await user.click(undo);
-  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
-    "person",
-  );
+  expect(screen.getByRole("button", { name: "person" })).toBeVisible();
   expect(undo).toBeDisabled();
   expect(redo).toBeEnabled();
 
   await user.click(redo);
-  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
-    "person edited",
-  );
+  expect(screen.getByRole("button", { name: "person edited" })).toBeVisible();
   expect(undo).toBeEnabled();
   expect(redo).toBeDisabled();
 });
@@ -2600,11 +2596,7 @@ it("exports exact TXT and JSON snapshots without marking edits clean", async () 
     textFile("10 20 30 40 delivery truck 0", "aerial.labels.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
   );
@@ -2677,11 +2669,7 @@ it("installs the beforeunload warning only while annotations are dirty", async (
     addEventListener.mock.calls.some(([type]) => type === "beforeunload"),
   ).toBe(false);
 
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   let warningListener!: EventListener;
   await waitFor(() => {
@@ -2915,9 +2903,7 @@ it("resets a focused coordinate draft before a same-ID label import", async () =
   );
   await showCardsWhenReady(user);
   expect(await screen.findByRole("textbox", { name: "X1" })).toHaveValue("12");
-  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
-    "car",
-  );
+  expect(screen.getByRole("button", { name: "car" })).toBeVisible();
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
 });
 
@@ -2931,11 +2917,7 @@ it("keeps the search field focused while its global Save shortcut runs", async (
     textFile("0 0 10 10 delivery person 0", "scene.txt"),
   );
   await showCards(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " edited");
 
   const search = screen.getByRole("searchbox", {
     name: "Search annotations",
@@ -2983,17 +2965,11 @@ it("commits the newest concurrent Save snapshot last and reports it saved", asyn
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await showCardsWhenReady(user);
-  const expression = await screen.findByRole("textbox", {
-    name: "Expression",
-  });
-  await user.type(expression, " first");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " first");
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
   await waitFor(() => expect(handle.createWritable).toHaveBeenCalledTimes(1));
 
-  await user.click(expression);
-  await user.type(expression, " second");
-  fireEvent.blur(expression);
+  await appendToFirstCategory(user, " second");
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
   await settleDeferred(() => secondClose.resolve());
@@ -3006,7 +2982,7 @@ it("commits the newest concurrent Save snapshot last and reports it saved", asyn
     );
     expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
   });
-  expect(expression).toHaveValue("person first second");
+  expect(screen.getByRole("button", { name: "person first second" })).toBeVisible();
 });
 
 it("exposes named workspace, annotation panel, status and mode controls", async () => {
@@ -3244,24 +3220,24 @@ it("keeps the canvas clean until a category is selected", async () => {
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
   expect(screen.queryByTestId("bbox-ann_003")).not.toBeInTheDocument();
 
-  await user.click(screen.getByText("bicycle", { exact: true }));
+  await isolateCategory(user, "bicycle");
 
   expect(screen.getByTestId("bbox-ann_003")).toBeVisible();
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
 
   // Selecting another category swaps which boxes are drawn.
-  await user.click(screen.getByText("person", { exact: true }));
+  await isolateCategory(user, "person");
 
   expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
   expect(screen.getByTestId("bbox-ann_002")).toBeVisible();
   expect(screen.queryByTestId("bbox-ann_003")).not.toBeInTheDocument();
 
   // Clicking the active category again clears the canvas.
-  await user.click(screen.getByText("person", { exact: true }));
+  await isolateCategory(user, "person");
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
 });
 
-it("reveals a category from its arrow while its expression only isolates", async () => {
+it("reveals a category from its arrow while its expression opens for editing", async () => {
   const user = userEvent.setup();
   await renderApp();
 
@@ -3276,24 +3252,36 @@ it("reveals a category from its arrow while its expression only isolates", async
     name: "Toggle person boxes",
   });
   expect(personToggle).toHaveAttribute("aria-expanded", "false");
-  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
-  expect(screen.queryByDisplayValue("bicycle")).not.toBeInTheDocument();
+  expect(openCards("person")).toHaveLength(0);
+  expect(openCards("bicycle")).toHaveLength(0);
 
-  // Clicking the expression itself isolates it on canvas, nothing more: the
-  // arrow to its left stays the only way to unfold the boxes.
-  await user.click(screen.getByText("person", { exact: true }));
-
+  // Clicking the expression isolates it on canvas and leaves the panel folded;
+  // Edit is the control that opens the text for retyping.
+  await user.click(screen.getByRole("button", { name: "person" }));
   expect(personToggle).toHaveAttribute("aria-expanded", "false");
-  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
+  expect(openCards("person")).toHaveLength(0);
+  expect(screen.getByRole("button", { name: "person" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(
+    screen.queryByRole("textbox", { name: "Expression" }),
+  ).not.toBeInTheDocument();
 
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
+  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
+    "person",
+  );
   await user.click(personToggle);
   expect(personToggle).toHaveAttribute("aria-expanded", "true");
-  expect(await screen.findByDisplayValue("person")).toBeVisible();
-  expect(screen.queryByDisplayValue("bicycle")).not.toBeInTheDocument();
+  await waitFor(() => expect(openCards("person").length).toBeGreaterThan(0));
+  expect(openCards("bicycle")).toHaveLength(0);
 
   // And the arrow folds them away again.
   await user.click(personToggle);
-  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
+  expect(openCards("person")).toHaveLength(0);
 });
 
 it("deletes a whole expression after confirming", async () => {
@@ -3322,8 +3310,8 @@ it("deletes a whole expression after confirming", async () => {
   await user.click(within(confirm).getByRole("button", { name: "Delete boxes" }));
 
   expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
-  expect(screen.queryByDisplayValue("person")).not.toBeInTheDocument();
-  expect(screen.getByDisplayValue("bicycle")).toBeVisible();
+  expect(openCards("person")).toHaveLength(0);
+  expect(openCards("bicycle").length).toBeGreaterThan(0);
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
   );
@@ -3331,7 +3319,7 @@ it("deletes a whole expression after confirming", async () => {
   // One undo brings the whole expression back.
   await user.click(screen.getByRole("button", { name: "Undo" }));
   expect(screen.getByRole("status")).toHaveTextContent("3 annotations");
-  expect(await screen.findAllByDisplayValue("person")).toHaveLength(2);
+  await waitFor(() => expect(openCards("person")).toHaveLength(2));
 });
 
 it("keeps an expression when its deletion is cancelled", async () => {
@@ -3358,7 +3346,8 @@ it("keeps an expression when its deletion is cancelled", async () => {
     screen.queryByRole("dialog", { name: 'Delete every "person" box?' }),
   ).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("2 annotations");
-  expect(screen.getByDisplayValue("person")).toBeVisible();
+  expect(screen.getByRole("button", { name: "person" })).toBeVisible();
+  expect(openCards("person")).toHaveLength(1);
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
 });
 
@@ -3451,9 +3440,9 @@ it("isolates a category on the canvas when its header is activated", async () =>
   await screen.findByText("person", { exact: true });
 
   // Pick a category, then select one of its boxes.
-  await user.click(screen.getByText("person", { exact: true }));
+  await isolateCategory(user, "person");
   fireEvent.click(screen.getByTestId("bbox-ann_001"));
-  await user.click(screen.getByText("bicycle", { exact: true }));
+  await isolateCategory(user, "bicycle");
 
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
   expect(screen.queryByTestId("bbox-ann_002")).not.toBeInTheDocument();
@@ -3465,7 +3454,7 @@ it("isolates a category on the canvas when its header is activated", async () =>
   expect(panel.querySelector('[aria-current="true"]')).toBeNull();
 
   // Turning the category off leaves a clean canvas again.
-  await user.click(screen.getByText("bicycle", { exact: true }));
+  await isolateCategory(user, "bicycle");
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
   expect(screen.queryByTestId("bbox-ann_002")).not.toBeInTheDocument();
   expect(
@@ -3492,9 +3481,9 @@ it("resets isolation, selection, and the view with the reset control", async () 
   const imageSpace = screen.getByTestId("image-space");
   const fitScale = imageSpace.getAttribute("data-scale");
 
-  await user.click(screen.getByText("person", { exact: true }));
+  await isolateCategory(user, "person");
   fireEvent.click(screen.getByTestId("bbox-ann_001"));
-  await user.click(screen.getByText("bicycle", { exact: true }));
+  await isolateCategory(user, "bicycle");
   await user.click(screen.getByRole("button", { name: "Zoom in" }));
   expect(imageSpace.getAttribute("data-scale")).not.toBe(fitScale);
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
@@ -3618,7 +3607,7 @@ it("highlights every box of a category while it is hovered", async () => {
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
 });
 
-it("moves a box into another category after editing its expression", async () => {
+it("merges two categories when one is renamed onto the other", async () => {
   const user = userEvent.setup();
   await renderApp();
 
@@ -3630,25 +3619,17 @@ it("moves a box into another category after editing its expression", async () =>
   const panel = await screen.findByRole("complementary", {
     name: "Annotations",
   });
-  const expression = within(
-    panel.querySelector('[data-annotation-id="ann_001"]')!,
-  ).getByRole("textbox", { name: "Expression" });
 
-  await user.click(expression);
-  await user.clear(expression);
-  await user.type(expression, "bicycle");
-  await user.keyboard("{Enter}");
+  await renameCategory(user, "person", "bicycle");
 
   const groupLabels = [
     ...panel.querySelectorAll<HTMLElement>(".annotation-group-header"),
   ].map((header) => header.dataset.groupLabel);
   expect(groupLabels).toEqual(["bicycle"]);
-  expect(
-    panel.querySelectorAll<HTMLElement>("[data-annotation-id]"),
-  ).toHaveLength(2);
+  await waitFor(() => expect(openCards("bicycle")).toHaveLength(2));
 });
 
-it("keeps the editing card stable while its new label matches another category", async () => {
+it("keeps a category apart while its rename is still being typed", async () => {
   const user = userEvent.setup();
   await renderApp();
 
@@ -3660,15 +3641,16 @@ it("keeps the editing card stable while its new label matches another category",
   const panel = await screen.findByRole("complementary", {
     name: "Annotations",
   });
-  const expression = within(
-    panel.querySelector('[data-annotation-id="ann_001"]')!,
-  ).getByRole("textbox", { name: "Expression" });
+  await user.click(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  );
+  const editor = screen.getByRole("textbox", { name: "Expression" });
 
-  await user.click(expression);
-  await user.clear(expression);
-  await user.type(expression, "bicycle");
+  await user.clear(editor);
+  await user.type(editor, "bicycle");
 
-  expect(expression).toHaveValue("bicycle");
+  // The draft keeps its own header, so nothing merges under the cursor.
+  expect(editor).toHaveValue("bicycle");
   const headers = () =>
     [
       ...panel.querySelectorAll<HTMLElement>(".annotation-group-header"),
@@ -3676,9 +3658,9 @@ it("keeps the editing card stable while its new label matches another category",
   expect(headers()).toEqual(["person", "bicycle"]);
 
   await user.keyboard("{Enter}");
-  expect(headers()).toEqual(["bicycle"]);
-  expect(expression.isConnected).toBe(true);
-  expect(expression).toHaveValue("bicycle");
+
+  await waitFor(() => expect(headers()).toEqual(["bicycle"]));
+  await waitFor(() => expect(openCards("bicycle")).toHaveLength(2));
 });
 
 it("collapses and expands every category at once", async () => {
@@ -3734,7 +3716,9 @@ it("falls back to the classic file dialog when direct file access is blocked", a
   );
   await showCards(user);
 
-  expect(await screen.findByDisplayValue("fallback label")).toBeVisible();
+  await waitFor(() =>
+    expect(openCards("fallback label").length).toBeGreaterThan(0),
+  );
   expect(screen.getByTestId("editor-notice")).toHaveTextContent(
     /file dialog/i,
   );
@@ -3759,7 +3743,7 @@ it("downloads instead of writing when the retained handle is blocked", async () 
 
   await user.click(screen.getByRole("button", { name: "Open labels" }));
   await showCardsWhenReady(user);
-  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  await waitFor(() => expect(openCards("person").length).toBeGreaterThan(0));
 
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
@@ -3914,9 +3898,8 @@ it("opens a dataset item, edits it, and saves it back to the dataset", async () 
   expect(await screen.findByText("person", { exact: true })).toBeVisible();
   expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
-  // Picking the expression isolates its box on the canvas, while the card that
-  // owns the text stays folded behind the arrow.
-  await user.click(screen.getByText("person", { exact: true }));
+  // Picking the expression draws its box, while the cards stay folded.
+  await isolateCategory(user, "person");
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute(
     "x",
     "10",
@@ -3927,10 +3910,7 @@ it("opens a dataset item, edits it, and saves it back to the dataset", async () 
   await user.click(screen.getByRole("button", { name: "Toggle person boxes" }));
 
   // Edits save back into the dataset through the API.
-  const expression = screen.getByRole("textbox", { name: "Expression" });
-  await user.click(expression);
-  await user.type(expression, " edited");
-  fireEvent.blur(expression);
+  await renameCategory(user, "person", "person edited");
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
   await waitFor(() =>
@@ -3983,7 +3963,7 @@ it("scales normalized JSONL dataset targets to image pixels and back", async () 
   expect(within(panel).getByLabelText("Y1")).toHaveValue("1276.56");
   expect(within(panel).getByLabelText("X2")).toHaveValue("1904.64");
   expect(within(panel).getByLabelText("Y2")).toHaveValue("1477.44");
-  await user.click(screen.getByText("the giraffes", { exact: true }));
+  await isolateCategory(user, "the giraffes");
   const box = screen.getByTestId("bbox-ann_001");
   expect(Number(box.getAttribute("x"))).toBeCloseTo(1831.68, 6);
   expect(Number(box.getAttribute("width"))).toBeCloseTo(72.96, 6);
@@ -4024,7 +4004,7 @@ it("scales normalized JSONL labels once their image arrives later", async () => 
 
   await waitFor(() => expect(screen.getByLabelText("X2")).toHaveValue("400"));
   expect(screen.getByLabelText("Y2")).toHaveValue("300");
-  await user.click(screen.getByText("person", { exact: true }));
+  await isolateCategory(user, "person");
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("width", "400");
   expect(screen.getByTestId("bbox-ann_001")).toHaveAttribute("height", "300");
 });
@@ -4094,7 +4074,7 @@ it("switches between dataset items with previous and next", async () => {
 
   await openDatasetStem(user, "b");
 
-  expect(await screen.findByDisplayValue("beta")).toBeVisible();
+  await waitFor(() => expect(openCards("beta").length).toBeGreaterThan(0));
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 3");
   expect(screen.getByLabelText("Open files")).toHaveTextContent("b.jpg");
 
@@ -4102,7 +4082,7 @@ it("switches between dataset items with previous and next", async () => {
     user.click(screen.getByRole("button", { name: "Next image" })),
   );
 
-  expect(await screen.findByDisplayValue("gamma")).toBeVisible();
+  await waitFor(() => expect(openCards("gamma").length).toBeGreaterThan(0));
   expect(screen.getByLabelText("Open files")).toHaveTextContent("c.jpg");
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("3 / 3");
   expect(screen.getByRole("button", { name: "Next image" })).toBeDisabled();
@@ -4113,7 +4093,7 @@ it("switches between dataset items with previous and next", async () => {
     user.click(screen.getByRole("button", { name: "Previous image" })),
   );
 
-  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+  await waitFor(() => expect(openCards("alpha").length).toBeGreaterThan(0));
   expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 3");
   expect(screen.getByRole("button", { name: "Previous image" })).toBeDisabled();
@@ -4142,7 +4122,7 @@ it("steps through dataset items that have no labels", async () => {
   await renderApp();
 
   await openDatasetStem(user, "a");
-  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  await waitFor(() => expect(openCards("person").length).toBeGreaterThan(0));
   // `b` has no labels but is still part of the sequence; `c` has no image, so
   // it is not reachable from the canvas.
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 2");
@@ -4161,7 +4141,7 @@ it("steps through dataset items that have no labels", async () => {
   await revealCardsAfter(user, () =>
     user.click(screen.getByRole("button", { name: "Previous image" })),
   );
-  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  await waitFor(() => expect(openCards("person").length).toBeGreaterThan(0));
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 2");
 });
 
@@ -4187,9 +4167,7 @@ it("asks before discarding unsaved edits when switching dataset items", async ()
   await renderApp();
 
   await openDatasetStem(user, "a");
-  const expression = await screen.findByDisplayValue("alpha");
-  await user.clear(expression);
-  await user.type(expression, "changed{Enter}");
+  await renameCategory(user, "alpha", "changed");
   expect(screen.getByLabelText("Save status")).toHaveTextContent(
     "Unsaved changes",
   );
@@ -4206,7 +4184,7 @@ it("asks before discarding unsaved edits when switching dataset items", async ()
   expect(
     screen.queryByRole("dialog", { name: "Discard unsaved changes?" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByDisplayValue("changed")).toBeVisible();
+  expect(openCards("changed").length).toBeGreaterThan(0);
 
   await user.click(screen.getByRole("button", { name: "Next image" }));
   await revealCardsAfter(user, async () => {
@@ -4215,7 +4193,7 @@ it("asks before discarding unsaved edits when switching dataset items", async ()
     );
   });
 
-  expect(await screen.findByDisplayValue("beta")).toBeVisible();
+  await waitFor(() => expect(openCards("beta").length).toBeGreaterThan(0));
   expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 3");
   expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
 });
@@ -4232,17 +4210,17 @@ it("moves between dataset items with Alt+Arrow keys", async () => {
   await renderApp();
 
   await openDatasetStem(user, "a");
-  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+  await waitFor(() => expect(openCards("alpha").length).toBeGreaterThan(0));
 
   await revealCardsAfter(user, () => {
     fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
   });
-  expect(await screen.findByDisplayValue("beta")).toBeVisible();
+  await waitFor(() => expect(openCards("beta").length).toBeGreaterThan(0));
 
   await revealCardsAfter(user, () => {
     fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
   });
-  expect(await screen.findByDisplayValue("alpha")).toBeVisible();
+  await waitFor(() => expect(openCards("alpha").length).toBeGreaterThan(0));
 });
 
 it("lands on the dataset home and opens an item from there", async () => {
@@ -4276,7 +4254,7 @@ it("lands on the dataset home and opens an item from there", async () => {
   expect(
     await screen.findByRole("region", { name: "Image workspace" }),
   ).toBeVisible();
-  expect(await screen.findByDisplayValue("person")).toBeVisible();
+  await waitFor(() => expect(openCards("person").length).toBeGreaterThan(0));
   expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
 });
 
@@ -4651,15 +4629,13 @@ it("re-enters the imported item on the canvas after Confirm import", async () =>
     user.click(within(dialog).getByRole("button", { name: "Confirm import" })),
   );
 
-  expect(
-    await screen.findByDisplayValue("person"),
-  ).toBeVisible();
+  await waitFor(() => expect(openCards("person").length).toBeGreaterThan(0));
   expect(screen.queryByRole("dialog", { name: "Datasets" })).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
   expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
   expect(screen.queryByTestId("bbox-ann_001")).not.toBeInTheDocument();
 
-  await user.click(screen.getByText("person", { exact: true }));
+  await isolateCategory(user, "person");
   expect(screen.getByTestId("bbox-ann_001")).toBeVisible();
 });
 

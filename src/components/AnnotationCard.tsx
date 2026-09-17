@@ -42,10 +42,13 @@ export interface AnnotationCardProps {
   dispatch: Dispatch<EditorAction>;
   onSelect: (id: string) => void;
   onLocate: (id: string) => void;
-  onExpressionEditingChange: (id: string | null) => void;
   onCoordinateDraftChange?: (id: string, pending: boolean) => void;
 }
 
+/**
+ * One box of the document. The expression belongs to the whole category, so it
+ * is renamed on the category header instead of per box.
+ */
 export const AnnotationCard = memo(function AnnotationCard({
   annotation,
   index,
@@ -54,25 +57,14 @@ export const AnnotationCard = memo(function AnnotationCard({
   dispatch,
   onSelect,
   onLocate,
-  onExpressionEditingChange,
   onCoordinateDraftChange,
 }: AnnotationCardProps): JSX.Element {
-  const [expression, setExpression] = useState(annotation.label);
-  const [expressionError, setExpressionError] = useState<string | null>(null);
   const [coordinates, setCoordinates] = useState(() =>
     bboxStrings(annotation.bbox),
   );
   const [coordinateError, setCoordinateError] = useState<string | null>(null);
-  const editingExpressionRef = useRef(false);
-  const focusStartLabelRef = useRef(annotation.label);
   const activeCoordinateRef = useRef<Coordinate | null>(null);
   const legalBBoxRef = useRef(annotation.bbox);
-
-  useEffect(() => {
-    if (editingExpressionRef.current) return;
-    setExpression(annotation.label);
-    focusStartLabelRef.current = annotation.label;
-  }, [annotation.label]);
 
   useEffect(() => {
     legalBBoxRef.current = annotation.bbox;
@@ -102,39 +94,6 @@ export const AnnotationCard = memo(function AnnotationCard({
     },
     [],
   );
-
-  const finishExpression = () => {
-    if (!editingExpressionRef.current) return;
-    editingExpressionRef.current = false;
-    const label = expression.trim();
-    if (label.length === 0) {
-      setExpression(focusStartLabelRef.current);
-      setExpressionError("Expression cannot be empty.");
-      dispatch({ type: "CANCEL_TRANSACTION" });
-      onExpressionEditingChange(null);
-      return;
-    }
-    setExpressionError(null);
-    if (label !== expression) {
-      setExpression(label);
-      dispatch({
-        type: "PREVIEW_PATCH",
-        id: annotation.id,
-        patch: { label },
-      });
-    }
-    dispatch({ type: "COMMIT_TRANSACTION" });
-    onExpressionEditingChange(null);
-  };
-
-  const cancelExpression = () => {
-    if (!editingExpressionRef.current) return;
-    editingExpressionRef.current = false;
-    setExpression(focusStartLabelRef.current);
-    setExpressionError(null);
-    dispatch({ type: "CANCEL_TRANSACTION" });
-    onExpressionEditingChange(null);
-  };
 
   const commitCoordinates = () => {
     if (!bounds) return;
@@ -204,46 +163,6 @@ export const AnnotationCard = memo(function AnnotationCard({
           Delete
         </button>
       </header>
-      <label onClick={(event) => event.stopPropagation()}>
-        Expression
-        <input
-          type="text"
-          data-expression-transaction-owner="true"
-          value={expression}
-          onFocus={() => {
-            onSelect(annotation.id);
-            if (editingExpressionRef.current) return;
-            editingExpressionRef.current = true;
-            focusStartLabelRef.current = expression;
-            onExpressionEditingChange(annotation.id);
-            dispatch({ type: "BEGIN_TRANSACTION" });
-          }}
-          onChange={(event) => {
-            const label = event.currentTarget.value;
-            setExpression(label);
-            setExpressionError(null);
-            dispatch({
-              type: "PREVIEW_PATCH",
-              id: annotation.id,
-              patch: { label },
-            });
-          }}
-          onBlur={finishExpression}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              cancelExpression();
-              event.currentTarget.blur();
-              return;
-            }
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            finishExpression();
-            event.currentTarget.blur();
-          }}
-        />
-      </label>
-      {expressionError ? <p role="alert">{expressionError}</p> : null}
       <div>
         {(Object.keys(coordinateLabels) as Coordinate[]).map((coordinate) => (
           <label key={coordinate} onClick={(event) => event.stopPropagation()}>

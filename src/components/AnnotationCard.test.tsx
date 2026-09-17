@@ -1,8 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useReducer } from "react";
 import type { Annotation } from "../domain/types";
-import { editorReducer, initialEditorState } from "../state/editorReducer";
 import { AnnotationCard } from "./AnnotationCard";
 import { AnnotationPanel } from "./AnnotationPanel";
 
@@ -12,38 +10,6 @@ const annotation: Annotation = {
   label: "person",
   reservedField: "0",
 };
-
-function ReducerPanelHarness() {
-  const [state, dispatch] = useReducer(
-    editorReducer,
-    initialEditorState,
-    (initialState) =>
-      editorReducer(initialState, {
-        type: "LOAD_ANNOTATIONS",
-        annotations: [annotation],
-        fileName: "scene.txt",
-      }),
-  );
-
-  return (
-    <>
-      <AnnotationPanel
-        annotations={state.annotations}
-        selectedId={state.selectedId}
-        bounds={null}
-        dispatch={dispatch}
-        onLocate={vi.fn()}
-      />
-      <output data-testid="transaction-state">
-        {state.transactionBase === null ? "closed" : "open"}
-      </output>
-      <output data-testid="past-count">{state.past.length}</output>
-      <output data-testid="current-label">
-        {state.annotations[0]?.label ?? "missing"}
-      </output>
-    </>
-  );
-}
 
 /** Categories start collapsed, so panel tests reveal the cards they drive. */
 async function showAllCards(): Promise<void> {
@@ -62,168 +28,22 @@ function renderCard(dispatch = vi.fn()) {
       dispatch={dispatch}
       onSelect={vi.fn()}
       onLocate={vi.fn()}
-      onExpressionEditingChange={vi.fn()}
     />,
   );
   return dispatch;
 }
 
-it("previews every visible expression value and commits one transaction on blur", async () => {
-  const user = userEvent.setup();
-  const dispatch = renderCard();
-  const input = screen.getByRole("textbox", { name: "Expression" });
+it("shows only the box coordinates: the expression lives on the category", () => {
+  renderCard();
 
-  await user.click(input);
-  await user.clear(input);
-  await user.type(input, "new label");
-  fireEvent.blur(input);
-
-  expect(dispatch.mock.calls).toEqual([
-    [{ type: "BEGIN_TRANSACTION" }],
-    [
-      {
-        type: "PREVIEW_PATCH",
-        id: "ann_001",
-        patch: { label: "" },
-      },
-    ],
-    ...[..."new label"].map((_, index) => [
-      {
-        type: "PREVIEW_PATCH",
-        id: "ann_001",
-        patch: { label: "new label".slice(0, index + 1) },
-      },
-    ]),
-    [{ type: "COMMIT_TRANSACTION" }],
-  ]);
-});
-
-it("trims an expression on Enter before committing exactly once", async () => {
-  const user = userEvent.setup();
-  const dispatch = renderCard();
-  const input = screen.getByRole("textbox", { name: "Expression" });
-
-  await user.click(input);
-  await user.clear(input);
-  await user.type(input, "  updated person  ");
-  dispatch.mockClear();
-  fireEvent.keyDown(input, { key: "Enter" });
-  fireEvent.blur(input);
-
-  expect(input).toHaveValue("updated person");
-  expect(dispatch.mock.calls).toEqual([
-    [
-      {
-        type: "PREVIEW_PATCH",
-        id: "ann_001",
-        patch: { label: "updated person" },
-      },
-    ],
-    [{ type: "COMMIT_TRANSACTION" }],
-  ]);
-});
-
-it("cancels an empty expression and restores the focus-start label", async () => {
-  const user = userEvent.setup();
-  const dispatch = renderCard();
-  const input = screen.getByRole("textbox", { name: "Expression" });
-
-  await user.click(input);
-  await user.clear(input);
-  fireEvent.blur(input);
-
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Expression cannot be empty.",
-  );
-  expect(input).toHaveValue("person");
-  expect(dispatch).toHaveBeenLastCalledWith({ type: "CANCEL_TRANSACTION" });
+  // The expression is renamed once per category, never per box.
   expect(
-    dispatch.mock.calls.filter(([action]) => action.type === "CANCEL_TRANSACTION"),
-  ).toHaveLength(1);
-  expect(
-    dispatch.mock.calls.filter(([action]) => action.type === "COMMIT_TRANSACTION"),
-  ).toHaveLength(0);
-});
-
-it("cancels expression editing once on Escape and restores the focus-start label", async () => {
-  const user = userEvent.setup();
-  const dispatch = renderCard();
-  const input = screen.getByRole("textbox", { name: "Expression" });
-
-  await user.click(input);
-  await user.clear(input);
-  await user.type(input, "temporary");
-  dispatch.mockClear();
-  fireEvent.keyDown(input, { key: "Escape" });
-  fireEvent.blur(input);
-
-  expect(input).toHaveValue("person");
-  expect(dispatch.mock.calls).toEqual([[{ type: "CANCEL_TRANSACTION" }]]);
-  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-});
-
-it.each([
-  ["blur", "updated"],
-  ["Enter", "updated"],
-  ["empty blur", ""],
-  ["Escape", "updated"],
-] as const)(
-  "reports expression editing active then inactive exactly once on %s",
-  (finish, value) => {
-    const onExpressionEditingChange = vi.fn();
-    render(
-      <AnnotationCard
-        annotation={annotation}
-        index={1}
-        bounds={{ width: 1920, height: 1080 }}
-        selected
-        dispatch={vi.fn()}
-        onSelect={vi.fn()}
-        onLocate={vi.fn()}
-        onExpressionEditingChange={onExpressionEditingChange}
-      />,
-    );
-    const input = screen.getByRole("textbox", { name: "Expression" });
-    fireEvent.focus(input);
-    fireEvent.change(input, { target: { value } });
-
-    if (finish === "blur" || finish === "empty blur") {
-      fireEvent.blur(input);
-    } else {
-      fireEvent.keyDown(input, { key: finish });
-      fireEvent.blur(input);
-    }
-
-    expect(onExpressionEditingChange.mock.calls).toEqual([
-      ["ann_001"],
-      [null],
-    ]);
-  },
-);
-
-it("synchronizes an unfocused expression from annotation prop changes", () => {
-  const dispatch = vi.fn();
-  const props = {
-    annotation,
-    index: 1,
-    bounds: { width: 1920, height: 1080 },
-    selected: true,
-    dispatch,
-    onSelect: vi.fn(),
-    onLocate: vi.fn(),
-    onExpressionEditingChange: vi.fn(),
-  };
-  const { rerender } = render(<AnnotationCard {...props} />);
-
-  rerender(
-    <AnnotationCard
-      {...props}
-      annotation={{ ...annotation, label: "externally updated" }}
-    />,
-  );
-
-  expect(screen.getByRole("textbox", { name: "Expression" })).toHaveValue(
-    "externally updated",
+    screen.queryByRole("textbox", { name: "Expression" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "X1" })).toBeVisible();
+  expect(screen.getByRole("article")).toHaveAttribute(
+    "data-annotation-label",
+    "person",
   );
 });
 
@@ -325,7 +145,6 @@ it("clamps a valid coordinate commit to the current image bounds", () => {
       dispatch={dispatch}
       onSelect={vi.fn()}
       onLocate={vi.fn()}
-      onExpressionEditingChange={vi.fn()}
     />,
   );
   const x1 = screen.getByRole("textbox", { name: "X1" });
@@ -360,7 +179,6 @@ it("syncs canvas-driven coordinate props except for the actively edited field", 
     dispatch: vi.fn(),
     onSelect: vi.fn(),
     onLocate: vi.fn(),
-    onExpressionEditingChange: vi.fn(),
   };
   const { rerender } = render(<AnnotationCard {...props} />);
   const x1 = screen.getByRole("textbox", { name: "X1" });
@@ -394,11 +212,13 @@ it("disables bbox editing when image bounds are unavailable", () => {
       dispatch={dispatch}
       onSelect={vi.fn()}
       onLocate={vi.fn()}
-      onExpressionEditingChange={vi.fn()}
     />,
   );
 
-  expect(screen.getByRole("textbox", { name: "Expression" })).toBeEnabled();
+  // Only the coordinates are editable, and they lock without an image size.
+  expect(
+    screen.queryByRole("textbox", { name: "Expression" }),
+  ).not.toBeInTheDocument();
   for (const name of ["X1", "Y1", "X2", "Y2"]) {
     expect(screen.getByRole("textbox", { name })).toBeDisabled();
   }
@@ -474,7 +294,7 @@ it("keeps each card's source ordinal while filtering", async () => {
   expect(screen.queryByText("Annotation 1")).not.toBeInTheDocument();
 });
 
-it("isolates an expression when its name is clicked without unfolding it", async () => {
+it("isolates a category from its expression without unfolding it", async () => {
   const user = userEvent.setup();
   const onActivateLabel = vi.fn();
   const { container } = render(
@@ -500,6 +320,122 @@ it("isolates an expression when its name is clicked without unfolding it", async
   expect(
     container.querySelectorAll("[data-annotation-id]"),
   ).toHaveLength(0);
+});
+
+it("marks the expression of the isolated category as pressed", () => {
+  render(
+    <AnnotationPanel
+      annotations={[annotation]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+      onActivateLabel={vi.fn()}
+      onRenameCategory={vi.fn()}
+      activeLabel="person"
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "person" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // Editing is an explicit control, never a side effect of picking a category.
+  expect(
+    screen.getByRole("button", { name: 'Edit "person" expression' }),
+  ).toBeVisible();
+  expect(screen.queryByRole("textbox", { name: "Expression" })).not.toBeInTheDocument();
+});
+
+it("renames every box of one expression from its header", async () => {
+  const user = userEvent.setup();
+  const onRenameCategory = vi.fn();
+  const { container } = render(
+    <AnnotationPanel
+      annotations={[
+        annotation,
+        { ...annotation, id: "ann_002" },
+        { ...annotation, id: "ann_003", label: "bicycle" },
+      ]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+      onRenameCategory={onRenameCategory}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: 'Edit "person" expression' }));
+  const editor = screen.getByRole("textbox", { name: "Expression" });
+  expect(editor).toHaveValue("person");
+  await user.clear(editor);
+  await user.type(editor, "pedestrian");
+  fireEvent.blur(editor);
+
+  // One rename for the whole category, and the header stays where it was until
+  // the caller applies it.
+  expect(onRenameCategory.mock.calls).toEqual([["person", "pedestrian"]]);
+  expect(
+    container.querySelector('.annotation-group-header[data-group-label="person"]'),
+  ).not.toBeNull();
+  expect(screen.getByRole("button", { name: "bicycle" })).toBeVisible();
+});
+
+it("commits a header rename on Enter and cancels it on Escape", async () => {
+  const user = userEvent.setup();
+  const onRenameCategory = vi.fn();
+  render(
+    <AnnotationPanel
+      annotations={[annotation]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+      onRenameCategory={onRenameCategory}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: 'Edit "person" expression' }));
+  const editor = screen.getByRole("textbox", { name: "Expression" });
+  await user.clear(editor);
+  await user.type(editor, "vehicle");
+  fireEvent.keyDown(editor, { key: "Enter" });
+  fireEvent.blur(editor);
+  expect(onRenameCategory.mock.calls).toEqual([["person", "vehicle"]]);
+
+  onRenameCategory.mockClear();
+  await user.click(screen.getByRole("button", { name: 'Edit "person" expression' }));
+  const reopened = screen.getByRole("textbox", { name: "Expression" });
+  await user.clear(reopened);
+  await user.type(reopened, "discarded");
+  fireEvent.keyDown(reopened, { key: "Escape" });
+  fireEvent.blur(reopened);
+
+  expect(onRenameCategory).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "person" })).toBeVisible();
+});
+
+it("leaves the expression alone when the header edit is empty", async () => {
+  const user = userEvent.setup();
+  const onRenameCategory = vi.fn();
+  render(
+    <AnnotationPanel
+      annotations={[annotation]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+      onRenameCategory={onRenameCategory}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: 'Edit "person" expression' }));
+  const editor = screen.getByRole("textbox", { name: "Expression" });
+  await user.clear(editor);
+  fireEvent.blur(editor);
+
+  expect(onRenameCategory).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "person" })).toBeVisible();
 });
 
 it("unfolds a category only from the arrow left of its expression", async () => {
@@ -673,21 +609,8 @@ it("selects card fields without locating them through click bubbling", async () 
   expect(dispatch).not.toHaveBeenCalled();
   expect(onLocate).not.toHaveBeenCalled();
 
-  await user.click(screen.getByRole("textbox", { name: "Expression" }));
-  expect(dispatch).toHaveBeenCalledWith({ type: "SELECT", id: "ann_001" });
-  expect(
-    dispatch.mock.calls.filter(([action]) => action.type === "SELECT"),
-  ).toHaveLength(1);
-  expect(onLocate).not.toHaveBeenCalled();
-
-  fireEvent.keyDown(screen.getByRole("textbox", { name: "Expression" }), {
-    key: "Escape",
-  });
-  dispatch.mockClear();
   await user.click(screen.getByRole("textbox", { name: "X1" }));
-  expect(dispatch.mock.calls).toEqual(
-    [[{ type: "SELECT", id: "ann_001" }]],
-  );
+  expect(dispatch.mock.calls).toEqual([[{ type: "SELECT", id: "ann_001" }]]);
   expect(onLocate).not.toHaveBeenCalled();
 });
 
@@ -740,66 +663,34 @@ it("scrolls the exact selected special-character ID without CSS.escape", async (
   }
 });
 
-it("retains an empty focused search match until blur cancels and restores it", async () => {
+it("keeps a header editable while its expression no longer matches the search", async () => {
   const user = userEvent.setup();
-  render(<ReducerPanelHarness />);
-  const search = screen.getByRole("searchbox", {
-    name: "Search annotations",
-  });
-  await user.type(search, "per");
-  const expression = screen.getByRole("textbox", { name: "Expression" });
-
-  fireEvent.focus(expression);
-  fireEvent.change(expression, { target: { value: "" } });
-
-  expect(screen.getByLabelText("Matching annotations")).toHaveTextContent(
-    "0 matches",
-  );
-  expect(expression).toBeInTheDocument();
-  expect(expression).toHaveValue("");
-  expect(screen.getByTestId("transaction-state")).toHaveTextContent("open");
-
-  fireEvent.blur(expression);
-
-  expect(screen.getByTestId("transaction-state")).toHaveTextContent("closed");
-  expect(screen.getByTestId("past-count")).toHaveTextContent("0");
-  expect(screen.getByTestId("current-label")).toHaveTextContent("person");
-  expect(expression).toHaveValue("person");
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Expression cannot be empty.",
+  const onRenameCategory = vi.fn();
+  render(
+    <AnnotationPanel
+      annotations={[annotation]}
+      selectedId={null}
+      bounds={{ width: 1920, height: 1080 }}
+      dispatch={vi.fn()}
+      onLocate={vi.fn()}
+      onRenameCategory={onRenameCategory}
+    />,
   );
 
-  await user.clear(search);
-  await user.type(search, "zzz");
-  expect(
-    screen.queryByRole("textbox", { name: "Expression" }),
-  ).not.toBeInTheDocument();
-});
-
-it("removes a retained search mismatch only after its valid edit commits", async () => {
-  const user = userEvent.setup();
-  render(<ReducerPanelHarness />);
   await user.type(
     screen.getByRole("searchbox", { name: "Search annotations" }),
     "per",
   );
-  const expression = screen.getByRole("textbox", { name: "Expression" });
+  await user.click(screen.getByRole("button", { name: 'Edit "person" expression' }));
+  const editor = screen.getByRole("textbox", { name: "Expression" });
 
-  fireEvent.focus(expression);
-  fireEvent.change(expression, { target: { value: "vehicle" } });
+  await user.clear(editor);
+  await user.type(editor, "vehicle");
 
-  expect(screen.getByLabelText("Matching annotations")).toHaveTextContent(
-    "0 matches",
-  );
-  expect(expression).toBeInTheDocument();
-  expect(screen.getByTestId("transaction-state")).toHaveTextContent("open");
+  // The draft keeps the category under its searchable name until it commits.
+  expect(editor).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Toggle person boxes" })).toBeVisible();
 
-  fireEvent.blur(expression);
-
-  expect(screen.getByTestId("transaction-state")).toHaveTextContent("closed");
-  expect(screen.getByTestId("past-count")).toHaveTextContent("1");
-  expect(screen.getByTestId("current-label")).toHaveTextContent("vehicle");
-  expect(
-    screen.queryByRole("textbox", { name: "Expression" }),
-  ).not.toBeInTheDocument();
+  fireEvent.blur(editor);
+  expect(onRenameCategory.mock.calls).toEqual([["person", "vehicle"]]);
 });

@@ -74,11 +74,12 @@ function clampPanTransform(
   };
 }
 
-function blurActiveExpressionTransactionOwner(): void {
+/** Commits a half-typed expression before a canvas gesture takes over. */
+function blurActiveExpressionEditor(): void {
   const activeElement = document.activeElement;
   if (
     !(activeElement instanceof HTMLElement) ||
-    !activeElement.hasAttribute("data-expression-transaction-owner")
+    !activeElement.hasAttribute("data-expression-editor")
   ) {
     return;
   }
@@ -655,7 +656,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
-    blurActiveExpressionTransactionOwner();
+    blurActiveExpressionEditor();
     interactionRef.current = {
       type: "move",
       pointerId: event.pointerId,
@@ -683,7 +684,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     event.preventDefault();
     event.stopPropagation();
-    blurActiveExpressionTransactionOwner();
+    blurActiveExpressionEditor();
     interactionRef.current = {
       type: "resize",
       pointerId: event.pointerId,

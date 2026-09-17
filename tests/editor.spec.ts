@@ -145,7 +145,9 @@ test("edits a complete REC document without coordinate drift", async ({
     ),
   ).not.toEqual(afterMove);
 
-  const expression = selectedCard.getByLabel("Expression");
+  // Its Edit control retypes the expression of every box in that category.
+  await page.getByRole("button", { name: 'Edit "person" expression' }).click();
+  const expression = page.getByRole("textbox", { name: "Expression" });
   await expression.fill("the person nearest the blue car");
   await expression.blur();
 

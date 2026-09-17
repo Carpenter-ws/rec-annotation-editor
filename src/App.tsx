@@ -75,6 +75,29 @@ interface ErrorReport {
   issues: readonly ErrorDialogIssue[];
 }
 
+/**
+ * Commits a half-typed draft before a global action takes over: a box coordinate
+ * inside a card, or the expression of a category on its header. Returns whether
+ * anything was blurred, so callers can run their action after the commit.
+ */
+function blurPendingDraft(): boolean {
+  const activeElement = document.activeElement;
+  if (
+    !isEditableTarget(activeElement) ||
+    !(activeElement instanceof HTMLElement)
+  ) {
+    return false;
+  }
+  if (
+    activeElement.closest("[data-annotation-id]") === null &&
+    !activeElement.hasAttribute("data-expression-editor")
+  ) {
+    return false;
+  }
+  activeElement.blur();
+  return true;
+}
+
 interface ClampedAnnotations {
   annotations: Annotation[];
   count: number;
@@ -317,6 +340,18 @@ function EditorWorkspace(): JSX.Element {
     setHighlightedLabel((current) => (current === label ? null : current));
   }, [dispatch, pendingCategoryDelete]);
 
+  const handleRenameCategory = useCallback(
+    (label: string, nextLabel: string) => {
+      dispatch({ type: "RENAME_LABEL", label, nextLabel });
+      // Isolation and hover follow the category they point at.
+      setActiveLabel((current) => (current === label ? nextLabel : current));
+      setHighlightedLabel((current) =>
+        current === label ? nextLabel : current,
+      );
+    },
+    [dispatch],
+  );
+
   const handleActivateLabel = useCallback(
     (label: string) => {
       setActiveLabel((current) => {
@@ -366,14 +401,7 @@ function EditorWorkspace(): JSX.Element {
       const isCurrent = () =>
         mountedRef.current && importGenerationRef.current === generation;
       try {
-        const activeElement = document.activeElement;
-        if (
-          isEditableTarget(activeElement) &&
-          activeElement instanceof HTMLElement &&
-          activeElement.closest("[data-annotation-id]")
-        ) {
-          activeElement.blur();
-        }
+        blurPendingDraft();
         setDraftBBox(null);
         setHighlightedLabel(null);
         setActiveLabel(null);
@@ -506,14 +534,7 @@ function EditorWorkspace(): JSX.Element {
   ): Promise<void> => {
     if (files.image || files.labels) {
       setView("editor");
-      const activeElement = document.activeElement;
-      if (
-        isEditableTarget(activeElement) &&
-        activeElement instanceof HTMLElement &&
-        activeElement.closest("[data-annotation-id]")
-      ) {
-        activeElement.blur();
-      }
+      blurPendingDraft();
       setDraftBBox(null);
       setHighlightedLabel(null);
       setActiveLabel(null);
@@ -929,13 +950,7 @@ function EditorWorkspace(): JSX.Element {
   };
 
   const runAfterEditorBlur = (action: () => void) => {
-    const activeElement = document.activeElement;
-    if (
-      isEditableTarget(activeElement) &&
-      activeElement instanceof HTMLElement &&
-      activeElement.closest("[data-annotation-id]")
-    ) {
-      activeElement.blur();
+    if (blurPendingDraft()) {
       window.setTimeout(action, 0);
       return;
     }
@@ -1115,6 +1130,7 @@ function EditorWorkspace(): JSX.Element {
             onReset={handleResetView}
             onAddToCategory={handleAddToCategory}
             onDeleteCategory={setPendingCategoryDelete}
+            onRenameCategory={handleRenameCategory}
           />
         </aside>
       </main>

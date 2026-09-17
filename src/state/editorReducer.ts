@@ -47,6 +47,7 @@ export type EditorAction =
   | { type: "ADD_ANNOTATION"; annotation: Annotation }
   | { type: "DELETE_ANNOTATION"; id: string }
   | { type: "DELETE_LABEL"; label: string }
+  | { type: "RENAME_LABEL"; label: string; nextLabel: string }
   | { type: "UNDO" }
   | { type: "REDO" }
   | { type: "MARK_SAVED" };
@@ -280,6 +281,26 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return selected && selected.label === action.label
         ? { ...committed, selectedId: null }
         : committed;
+    }
+
+    case "RENAME_LABEL": {
+      const resolved = resolveTransaction(state);
+      if (action.nextLabel === action.label) return resolved;
+      if (
+        !resolved.annotations.some(
+          (annotation) => annotation.label === action.label,
+        )
+      ) {
+        return resolved;
+      }
+      // Ids and boxes are untouched, so a selected box stays selected and the
+      // whole rename is a single history entry.
+      const renamed = resolved.annotations.map((annotation) =>
+        annotation.label === action.label
+          ? { ...annotation, label: action.nextLabel }
+          : annotation,
+      );
+      return commitAtomicEdit(resolved, renamed);
     }
 
     case "UNDO": {

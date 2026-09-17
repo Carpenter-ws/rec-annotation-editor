@@ -27,6 +27,8 @@ export interface AnnotationPanelProps {
   onAddToCategory?: (label: string) => void;
   /** Remove every box of one expression (the caller confirms it first). */
   onDeleteCategory?: (label: string) => void;
+  /** Rename every box of one expression; the caller applies it atomically. */
+  onRenameCategory?: (label: string, nextLabel: string) => void;
 }
 
 interface AnnotationEntry {
@@ -54,21 +56,23 @@ export function AnnotationPanel({
   onReset,
   onAddToCategory,
   onDeleteCategory,
+  onRenameCategory,
 }: AnnotationPanelProps): JSX.Element {
   const [query, setQuery] = useState("");
-  const [activeExpressionId, setActiveExpressionId] = useState<string | null>(
-    null,
-  );
   // Categories start collapsed: the panel shows the expressions first, and a
   // category reveals its boxes only when it is expanded.
   const [expandedLabels, setExpandedLabels] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  /** Expression being retyped on its header; `null` while nothing is edited. */
+  const [renameDraft, setRenameDraft] = useState<{
+    from: string;
+    value: string;
+  } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const annotationsRef = useRef(annotations);
-  const editingStartRef = useRef<{ id: string; label: string } | null>(null);
   const scrolledForIdRef = useRef<string | null>(null);
-  annotationsRef.current = annotations;
+  /** Committed exactly once, even when Enter is followed by a blur. */
+  const draftRef = useRef<{ from: string; value: string } | null>(null);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const annotationEntries = useMemo(
@@ -88,47 +92,40 @@ export function AnnotationPanel({
     [annotationEntries],
   );
 
-  // Boxes are grouped by their exact text label. While an expression is being
-  // edited, its box stays in the category it started in so the focused card
-  // never remounts; it regroups once the edit commits.
+  // Boxes are grouped by their exact text label. A header that is being retyped
+  // keeps its original label until the edit commits, so the input never
+  // remounts under the cursor and equal labels never merge mid-typing.
   const groups = useMemo<LabelGroup[]>(() => {
     const map = new Map<string, LabelGroup>();
     for (const entry of annotationEntries) {
-      const key =
-        entry.annotation.id === activeExpressionId &&
-        editingStartRef.current !== null
-          ? editingStartRef.current.label
-          : entry.annotation.label;
-      let group = map.get(key);
+      const label = entry.annotation.label;
+      let group = map.get(label);
       if (!group) {
         group = {
-          label: key,
+          label,
           entries: [],
-          labelMatches: key.toLocaleLowerCase().includes(normalizedQuery),
+          labelMatches: label.toLocaleLowerCase().includes(normalizedQuery),
         };
-        map.set(key, group);
+        map.set(label, group);
       }
       group.entries.push(entry);
     }
     return [...map.values()];
-  }, [activeExpressionId, annotationEntries, normalizedQuery]);
+  }, [annotationEntries, normalizedQuery]);
 
   const visibleGroups = useMemo(
     () =>
       groups
         .map((group) => ({
           group,
-          visibleEntries: group.entries.filter(
-            ({ annotation, matches }) =>
-              matches || annotation.id === activeExpressionId,
-          ),
+          visibleEntries: group.entries.filter(({ matches }) => matches),
         }))
         .filter(({ group, visibleEntries }) =>
           normalizedQuery
             ? group.labelMatches || visibleEntries.length > 0
             : true,
         ),
-    [activeExpressionId, groups, normalizedQuery],
+    [groups, normalizedQuery],
   );
 
   const ensureExpanded = useCallback((label: string) => {
@@ -145,29 +142,47 @@ export function AnnotationPanel({
     [dispatch],
   );
 
-  const handleExpressionEditingChange = useCallback(
-    (id: string | null) => {
-      if (id) {
-        const annotation = annotationsRef.current.find(
-          (candidate) => candidate.id === id,
-        );
-        editingStartRef.current = { id, label: annotation?.label ?? "" };
-        ensureExpanded(editingStartRef.current.label);
-        setActiveExpressionId(id);
-        return;
-      }
-      const finished = editingStartRef.current;
-      editingStartRef.current = null;
-      setActiveExpressionId(null);
-      if (finished) {
-        const annotation = annotationsRef.current.find(
-          (candidate) => candidate.id === finished.id,
-        );
-        if (annotation) ensureExpanded(annotation.label);
-      }
+  // Retyping the expression of a category renames all of its boxes at once.
+  // The draft is local: nothing is dispatched until it is committed, so the
+  // header cannot remount or merge with an equal label under the cursor.
+  const beginRename = useCallback((label: string) => {
+    draftRef.current = { from: label, value: label };
+    setRenameDraft(draftRef.current);
+  }, []);
+
+  // Enter commits and then blurs, so the draft is tracked in a ref: the commit
+  // runs exactly once no matter how React batches the state updates.
+  const dropRenameDraft = useCallback(() => {
+    draftRef.current = null;
+    setRenameDraft(null);
+  }, []);
+
+  /** Grows the editor to the wrapped height of the expression being retyped. */
+  const sizeExpressionEditor = useCallback(
+    (element: HTMLTextAreaElement | null) => {
+      if (!element || element.scrollHeight <= 0) return;
+      element.style.height = "auto";
+      element.style.height = `${element.scrollHeight}px`;
     },
-    [ensureExpanded],
+    [],
   );
+
+  const commitRename = useCallback(() => {
+    const draft = draftRef.current;
+    dropRenameDraft();
+    if (!draft) return;
+    const nextLabel = draft.value.trim();
+    if (nextLabel === "" || nextLabel === draft.from) return;
+    // Keep the category unfolded under its new name.
+    setExpandedLabels((current) => {
+      if (!current.has(draft.from)) return current;
+      const next = new Set(current);
+      next.delete(draft.from);
+      next.add(nextLabel);
+      return next;
+    });
+    onRenameCategory?.(draft.from, nextLabel);
+  }, [dropRenameDraft, onRenameCategory]);
 
   // Activation replaces the hover preview, so clicking a category and clicking
   // it again really does show and then hide its boxes. It deliberately leaves
@@ -180,23 +195,16 @@ export function AnnotationPanel({
     [onActivateLabel, onHighlightLabel],
   );
 
-  const toggleGroup = useCallback(
-    (group: LabelGroup) => {
-      const keepsEditingCard = group.entries.some(
-        ({ annotation }) => annotation.id === activeExpressionId,
-      );
-      setExpandedLabels((current) => {
-        const isExpanded = current.has(group.label);
-        // Never unmount the card that currently owns the text edit.
-        if (isExpanded && keepsEditingCard) return current;
-        const next = new Set(current);
-        if (isExpanded) next.delete(group.label);
-        else next.add(group.label);
-        return next;
-      });
-    },
-    [activeExpressionId],
-  );
+  // Folding only affects the box cards: the header (and its expression editor)
+  // stays mounted, so an unfolding/collapsing click never interrupts a rename.
+  const toggleGroup = useCallback((group: LabelGroup) => {
+    setExpandedLabels((current) => {
+      const next = new Set(current);
+      if (next.has(group.label)) next.delete(group.label);
+      else next.add(group.label);
+      return next;
+    });
+  }, []);
 
   const allExpanded =
     groups.length > 0 &&
@@ -300,17 +308,64 @@ export function AnnotationPanel({
                 >
                   {collapsed ? "▸" : "▾"}
                 </button>
-                <button
-                  type="button"
-                  className="annotation-group-label"
-                  title="Select and highlight this category (use the arrow to unfold its boxes)"
-                  onClick={() => activateGroup(group)}
-                >
-                  {group.label}
-                </button>
+                {renameDraft?.from === group.label ? (
+                  <textarea
+                    autoFocus
+                    rows={1}
+                    ref={sizeExpressionEditor}
+                    className="annotation-group-expression"
+                    data-expression-editor="true"
+                    aria-label="Expression"
+                    title="Renames every box of this expression"
+                    value={renameDraft.value}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => {
+                      sizeExpressionEditor(event.currentTarget);
+                      draftRef.current = {
+                        from: group.label,
+                        value: event.currentTarget.value,
+                      };
+                      setRenameDraft(draftRef.current);
+                    }}
+                    onBlur={commitRename}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        dropRenameDraft();
+                        event.currentTarget.blur();
+                        return;
+                      }
+                      if (event.key !== "Enter" || event.shiftKey) return;
+                      event.preventDefault();
+                      commitRename();
+                      event.currentTarget.blur();
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="annotation-group-label"
+                    aria-pressed={activeLabel === group.label}
+                    title="Select and highlight this category (use its Edit control to retype the expression)"
+                    onClick={() => activateGroup(group)}
+                  >
+                    {group.label}
+                  </button>
+                )}
                 <span className="annotation-group-count">
                   {group.entries.length}
                 </span>
+                {onRenameCategory && renameDraft?.from !== group.label ? (
+                  <button
+                    type="button"
+                    className="annotation-group-edit"
+                    aria-label={`Edit "${group.label}" expression`}
+                    title={`Retype the expression of every "${group.label}" box`}
+                    onClick={() => beginRename(group.label)}
+                  >
+                    Edit
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="annotation-group-add"
@@ -350,7 +405,6 @@ export function AnnotationPanel({
                       dispatch={dispatch}
                       onSelect={selectAnnotation}
                       onLocate={onLocate}
-                      onExpressionEditingChange={handleExpressionEditingChange}
                       onCoordinateDraftChange={onCoordinateDraftChange}
                     />
                   </div>,

@@ -553,6 +553,57 @@ it("commits an active preview transaction before deleting an expression", () => 
   expect(deleted.transactionBase).toBeNull();
 });
 
+it("renames every box of one expression as one undo unit", () => {
+  const car: Annotation = { ...person, id: "ann_003", label: "car" };
+  const selected = editorReducer(loadedState([person, secondPerson, car]), {
+    type: "SELECT",
+    id: "ann_002",
+  });
+
+  const renamed = editorReducer(selected, {
+    type: "RENAME_LABEL",
+    label: "person",
+    nextLabel: "pedestrian",
+  });
+
+  expect(renamed.annotations).toEqual([
+    { ...person, label: "pedestrian" },
+    { ...secondPerson, label: "pedestrian" },
+    car,
+  ]);
+  // Boxes, ids, and the selection survive; history holds a single entry.
+  expect(renamed.selectedId).toBe("ann_002");
+  expect(renamed.past).toEqual([[person, secondPerson, car]]);
+
+  const undone = editorReducer(renamed, { type: "UNDO" });
+  expect(undone.annotations).toEqual([person, secondPerson, car]);
+  expect(undone.dirty).toBe(false);
+});
+
+it("merges two expressions when one is renamed onto the other", () => {
+  const car: Annotation = { ...person, id: "ann_003", label: "car" };
+  const renamed = editorReducer(loadedState([person, car]), {
+    type: "RENAME_LABEL",
+    label: "person",
+    nextLabel: "car",
+  });
+
+  expect(renamed.annotations.map(({ label }) => label)).toEqual(["car", "car"]);
+});
+
+it("ignores a rename of a missing expression or a same-name rename", () => {
+  const branched = stateWithRedoBranch();
+
+  for (const action of [
+    { type: "RENAME_LABEL", label: "missing", nextLabel: "person" },
+    { type: "RENAME_LABEL", label: "person", nextLabel: "person" },
+  ] as const) {
+    const unchanged = editorReducer(branched, action);
+    expect(unchanged).toBe(branched);
+    expect(unchanged.future).toEqual([[{ ...person, label: "changed" }]]);
+  }
+});
+
 it("does not evict real bounded history with a same-value update", () => {
   let state = loadedState([person]);
 
