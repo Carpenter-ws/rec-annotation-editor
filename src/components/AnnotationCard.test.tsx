@@ -539,7 +539,12 @@ it("shows an empty level for a document that carries none", () => {
     />,
   );
 
+  // The empty field explains itself instead of looking like a broken value.
   expect(screen.getByLabelText('Level for "person"')).toHaveValue("");
+  expect(screen.getByLabelText('Level for "person"')).toHaveAttribute(
+    "title",
+    expect.stringContaining("no level"),
+  );
 });
 
 it("offers deleting a whole expression from its header", async () => {

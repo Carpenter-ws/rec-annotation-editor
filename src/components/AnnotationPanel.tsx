@@ -323,6 +323,10 @@ export function AnnotationPanel({
             // While searching, matching categories show their cards right away.
             const collapsed =
               normalizedQuery === "" && !expandedLabels.has(group.label);
+            const levelValue =
+              levelDraft?.from === group.label
+                ? levelDraft.value
+                : group.entries[0]?.annotation.level ?? "";
             const rows: JSX.Element[] = [
               <header
                 key={`header:${group.label}`}
@@ -397,13 +401,13 @@ export function AnnotationPanel({
                   className="annotation-group-level"
                   data-panel-draft="level"
                   aria-label={`Level for "${group.label}"`}
-                  title={`REC level of every "${group.label}" box`}
-                  placeholder="L?"
-                  value={
-                    levelDraft?.from === group.label
-                      ? levelDraft.value
-                      : group.entries[0]?.annotation.level ?? ""
+                  title={
+                    levelValue
+                      ? `REC level of every "${group.label}" box`
+                      : `This label file has no level for "${group.label}"; type L1, L2 or L3 to add one`
                   }
+                  placeholder="L?"
+                  value={levelValue}
                   onChange={(event) => {
                     levelDraftRef.current = {
                       from: group.label,

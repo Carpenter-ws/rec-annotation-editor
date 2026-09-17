@@ -205,6 +205,10 @@ line, shown on that category's header in the panel, and written back with it:
   expression stay two lines
 - a file that never carried levels is written back without the field, and TXT
   documents have no level to begin with
+- levels are only as good as the file: items that were saved before the editor
+  kept them were written without the field (their lines read
+  `{"expression":…,"targets":…}`), so their header fields start empty — retype
+  the level once per expression and it is stored from then on
 
 Every target becomes one box sharing the expression; boxes that share a label
 and a level are regrouped into one `targets` line on export.
