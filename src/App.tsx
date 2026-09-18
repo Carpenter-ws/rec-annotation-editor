@@ -23,6 +23,7 @@ import { nextReferenceId, parseReferenceBoxes } from "./domain/reference";
 import {
   datasetImageUrl,
   datasetLabelsUrl,
+  datasetOriginalsUrl,
   saveDatasetLabels,
   type DatasetItem,
 } from "./app/datasetApi";
@@ -33,7 +34,6 @@ import {
 import { useUnsavedWarning } from "./app/useUnsavedWarning";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { ReferenceBar } from "./components/ReferenceBar";
 import { DatasetDialog } from "./components/DatasetDialog";
 import { DatasetHome } from "./components/DatasetHome";
 import { ErrorDialog, type ErrorDialogIssue } from "./components/ErrorDialog";
@@ -229,6 +229,10 @@ function EditorWorkspace(): JSX.Element {
   const [errorReport, setErrorReport] = useState<ErrorReport | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
   const [draftBBox, setDraftBBox] = useState<BBox | null>(null);
+  /** Expression the dialog opens with when a box came from an original. */
+  const [draftInitialLabel, setDraftInitialLabel] = useState<string | null>(null);
+  /** Original the draft box was taken from, kept so the link survives the dialog. */
+  const [draftReferenceId, setDraftReferenceId] = useState<string | null>(null);
   const [pendingCoordinateIds, setPendingCoordinateIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -262,34 +266,31 @@ function EditorWorkspace(): JSX.Element {
   const [referenceBoxes, setReferenceBoxes] = useState<readonly ReferenceBox[]>(
     [],
   );
-  const [referenceFileName, setReferenceFileName] = useState<string | null>(
-    null,
-  );
   const [referenceEditing, setReferenceEditing] = useState(false);
+  /**
+   * Whether the originals are drawn. They are nothing but a reference for
+   * adding boxes, so hiding them is always reversible and adding a box brings
+   * them back on its own.
+   */
+  const [referenceVisible, setReferenceVisible] = useState(true);
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(
     null,
   );
   const referenceBoxesRef = useRef<readonly ReferenceBox[]>([]);
   referenceBoxesRef.current = referenceBoxes;
-  /** Originals whose box is already in the document. */
-  const acceptedReferenceIds = useMemo(
-    () =>
-      new Set(
-        state.annotations
-          .map((annotation) => annotation.referenceId)
-          .filter((id): id is string => typeof id === "string" && id !== ""),
-      ),
-    [state.annotations],
-  );
-  const acceptedReferenceCount = useMemo(
-    () =>
-      referenceBoxes.filter((box) => acceptedReferenceIds.has(box.id)).length,
-    [acceptedReferenceIds, referenceBoxes],
-  );
   const selectedReference = useMemo(
     () => referenceBoxes.find((box) => box.id === selectedReferenceId) ?? null,
     [referenceBoxes, selectedReferenceId],
   );
+  // Adding a box is when the reference matters most, so drawing one (or arming
+  // a category) puts the originals back on screen by itself. Hiding them again
+  // stays possible while the add gesture is still on.
+  const addingBox = state.mode === "add" || draftBBox !== null;
+  useEffect(() => {
+    if (!addingBox) return;
+    if (referenceBoxesRef.current.length === 0) return;
+    setReferenceVisible(true);
+  }, [addingBox]);
   const [toast, setToast] = useState<{ key: number; message: string } | null>(
     null,
   );
@@ -357,22 +358,31 @@ function EditorWorkspace(): JSX.Element {
   );
   const clearReference = useCallback(() => {
     setReferenceBoxes([]);
-    setReferenceFileName(null);
     setReferenceEditing(false);
+    setReferenceVisible(true);
     setSelectedReferenceId(null);
   }, []);
 
-  /** Reads an original-annotation file into the picking pool. */
-  const loadReference = useCallback(async (file: File) => {
-    try {
-      const text = await readTextFile(file);
-      if (!mountedRef.current) return;
-      const image = stateRef.current.image;
-      const parsed = parseReferenceBoxes(
-        text,
-        file.name,
-        image ? { width: image.width, height: image.height } : null,
-      );
+  const toggleReferenceVisible = useCallback(() => {
+    setReferenceVisible((current) => !current);
+  }, []);
+
+  const toggleReferenceEditing = useCallback(() => {
+    setReferenceEditing((current) => !current);
+    setSelectedReferenceId(null);
+    setNotice(null);
+    // Editing a box that is not on screen makes no sense.
+    setReferenceVisible(true);
+  }, []);
+
+  /** Turns original-annotation text into the picking pool. */
+  const applyReference = useCallback(
+    (
+      name: string,
+      text: string,
+      image: { width: number; height: number } | null,
+    ) => {
+      const parsed = parseReferenceBoxes(text, name, image);
       if (parsed.issues.length > 0) {
         setErrorReport({
           title: "Could not read the original annotations",
@@ -381,40 +391,76 @@ function EditorWorkspace(): JSX.Element {
         return;
       }
       setReferenceBoxes(parsed.boxes);
-      setReferenceFileName(file.name);
       setReferenceEditing(false);
+      setReferenceVisible(true);
       setSelectedReferenceId(null);
       setNotice(
         `Loaded ${parsed.boxes.length} original ${
           parsed.boxes.length === 1 ? "annotation" : "annotations"
-        } from "${file.name}". Click the ones to add.`,
+        } from "${name}". Click the ones to add.`,
       );
-    } catch (error) {
-      setErrorReport({
-        title: "Could not read the original annotations",
-        issues: [errorMessage(error)],
-      });
-    }
-  }, []);
+    },
+    [],
+  );
 
-  /** Accepts an original: its box joins the document, in sync with the original. */
+  /** Reads an original-annotation file into the picking pool. */
+  const loadReference = useCallback(
+    async (file: File) => {
+      try {
+        const text = await readTextFile(file);
+        if (!mountedRef.current) return;
+        const image = stateRef.current.image;
+        applyReference(
+          file.name,
+          text,
+          image ? { width: image.width, height: image.height } : null,
+        );
+      } catch (error) {
+        setErrorReport({
+          title: "Could not read the original annotations",
+          issues: [errorMessage(error)],
+        });
+      }
+    },
+    [applyReference],
+  );
+
+  /**
+   * A reference only ever feeds the add-box flow. With a category armed the
+   * click joins that expression; without one it opens the dialog for a box
+   * prefilled with the expression the reference carries. Nothing is added on
+   * its own, and outside add mode the layer is inert.
+   */
   const pickReference = useCallback(
     (referenceId: string) => {
       if (referenceEditing) return;
+      if (stateRef.current.mode !== "add") return;
       const box = referenceBoxesRef.current.find(
         (candidate) => candidate.id === referenceId,
       );
       if (!box) return;
+
       if (
         stateRef.current.annotations.some(
           (annotation) => annotation.referenceId === referenceId,
         )
       ) {
+        showToast("This original is already in the document.");
         return;
       }
-      addAnnotation(box.bbox, box.label, referenceId);
+
+      const label = draftLabelRef.current;
+      if (label === null) {
+        // No expression armed yet: ask for it, keeping the link to the original.
+        setDraftInitialLabel(box.label);
+        setDraftReferenceId(referenceId);
+        setDraftBBox(box.bbox);
+        dispatch({ type: "SET_MODE", mode: "select" });
+        return;
+      }
+      addAnnotation(box.bbox, label, referenceId);
     },
-    [addAnnotation, referenceEditing],
+    [addAnnotation, dispatch, referenceEditing, showToast],
   );
 
   const changeReference = useCallback((id: string, bbox: BBox) => {
@@ -450,6 +496,8 @@ function EditorWorkspace(): JSX.Element {
         addAnnotation(bbox, label);
         return;
       }
+      setDraftInitialLabel(null);
+      setDraftReferenceId(null);
       setDraftBBox(bbox);
     },
     [addAnnotation],
@@ -592,6 +640,25 @@ function EditorWorkspace(): JSX.Element {
         normalizedSourceRef.current = false;
         // The picking pool belongs to the item that was open.
         clearReference();
+
+        // An item that ships original annotations opens with them ready to pick.
+        if (item.originals) {
+          try {
+            const originalsResponse = await fetch(
+              datasetOriginalsUrl(datasetName, item.originals),
+            );
+            if (originalsResponse.ok) {
+              const originalsText = await originalsResponse.text();
+              if (!isCurrent()) return;
+              applyReference(item.originals, originalsText, {
+                width: image.width,
+                height: image.height,
+              });
+            }
+          } catch {
+            // Unreadable originals only cost the picking pool, not the item.
+          }
+        }
 
         // Without labels the item opens as an empty document; saving creates
         // the matching label file next to the image.
@@ -851,6 +918,9 @@ function EditorWorkspace(): JSX.Element {
   };
 
   const addDraftAnnotation = (label: string) => {
+    const referenceId = draftReferenceId;
+    setDraftInitialLabel(null);
+    setDraftReferenceId(null);
     if (!draftBBox) return;
     if (referenceEditing) {
       // While the originals are being edited, a drawn box joins them.
@@ -860,7 +930,7 @@ function EditorWorkspace(): JSX.Element {
       ]);
       setNotice(`Added an original annotation "${label}".`);
     } else {
-      addAnnotation(draftBBox, label);
+      addAnnotation(draftBBox, label, referenceId);
     }
     dispatch({ type: "SET_MODE", mode: "select" });
     setDraftBBox(null);
@@ -868,6 +938,7 @@ function EditorWorkspace(): JSX.Element {
 
   const cancelDraftAnnotation = () => {
     setDraftBBox(null);
+    setDraftInitialLabel(null);
     dispatch({ type: "SET_MODE", mode: "select" });
   };
 
@@ -1139,8 +1210,8 @@ function EditorWorkspace(): JSX.Element {
       runAfterEditorBlur(() => dispatch({ type: "REDO" })),
     onSave: () => runAfterEditorBlur(() => void save()),
     onDelete: () => {
-      // Deleting an accepted box hands its original back to the picking pool,
-      // which is exactly what dropping the link does.
+      // While the originals are being edited, Delete removes the selected one;
+      // the document is never touched by that.
       if (referenceEditing && selectedReferenceId !== null) {
         deleteSelectedReference();
         return;
@@ -1189,6 +1260,14 @@ function EditorWorkspace(): JSX.Element {
         onOpenLabels={(file) => void importFiles({ labels: file })}
         onPickLabels={() => void pickLabels()}
         onOpenOriginals={(file) => void loadReference(file)}
+        originalsLoaded={referenceBoxes.length > 0}
+        originalsVisible={referenceVisible}
+        originalsEditing={referenceEditing}
+        onToggleOriginalsVisible={toggleReferenceVisible}
+        onToggleOriginalsEditing={toggleReferenceEditing}
+        selectedOriginal={selectedReference}
+        onRenameOriginal={renameReference}
+        onDeleteOriginal={deleteSelectedReference}
         onOpenDatasets={() => setDatasetDialogOpen(true)}
         onSave={() => void save()}
         onSaveAs={() => void saveAs()}
@@ -1243,23 +1322,6 @@ function EditorWorkspace(): JSX.Element {
           }}
           onDrop={handleDrop}
         >
-          {referenceBoxes.length > 0 ? (
-            <ReferenceBar
-              fileName={referenceFileName}
-              boxes={referenceBoxes}
-              acceptedCount={acceptedReferenceCount}
-              editing={referenceEditing}
-              selected={selectedReference}
-              onToggleEditing={() => {
-                setReferenceEditing((current) => !current);
-                setSelectedReferenceId(null);
-                setNotice(null);
-              }}
-              onRenameSelected={renameReference}
-              onDeleteSelected={deleteSelectedReference}
-              onClear={clearReference}
-            />
-          ) : null}
           {state.mode === "add" ? (
             <div className="add-mode-banner" data-testid="add-mode-banner">
               {draftLabel
@@ -1289,7 +1351,7 @@ function EditorWorkspace(): JSX.Element {
               mode={state.mode}
               onDraftBox={handleDraftBox}
               referenceBoxes={referenceBoxes}
-              acceptedReferenceIds={acceptedReferenceIds}
+              referenceVisible={referenceVisible}
               referenceEditing={referenceEditing}
               selectedReferenceId={selectedReferenceId}
               onReferencePick={pickReference}
@@ -1340,6 +1402,7 @@ function EditorWorkspace(): JSX.Element {
       </main>
       {draftBBox ? (
         <NewAnnotationDialog
+          initialLabel={draftInitialLabel ?? undefined}
           onAdd={addDraftAnnotation}
           onCancel={cancelDraftAnnotation}
         />

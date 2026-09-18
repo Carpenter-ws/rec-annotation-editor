@@ -344,6 +344,7 @@ export function DatasetDialog({
                         accept="image/*,.txt,.jsonl"
                         aria-label={`Choose dataset files for ${dataset.name}`}
                         hidden
+                        disabled={busy}
                         onChange={(event) => {
                           const input = event.currentTarget;
                           const files = [...(input.files ?? [])];

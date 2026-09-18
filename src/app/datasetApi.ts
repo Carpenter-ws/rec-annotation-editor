@@ -7,6 +7,11 @@ export interface DatasetItem {
   image: string | null;
   /** File name inside the dataset's labels/ folder, once uploaded. */
   labels: string | null;
+  /**
+   * Optional original annotations of the same item, from the dataset's
+   * originals/ folder. They load as the picking pool when the item opens.
+   */
+  originals?: string | null;
 }
 
 export interface DatasetSummary {
@@ -227,6 +232,10 @@ export function datasetImageUrl(name: string, fileName: string): string {
 
 export function datasetLabelsUrl(name: string, fileName: string): string {
   return `/datasets/${encodeURIComponent(name)}/labels/${encodeURIComponent(fileName)}`;
+}
+
+export function datasetOriginalsUrl(name: string, fileName: string): string {
+  return `/datasets/${encodeURIComponent(name)}/originals/${encodeURIComponent(fileName)}`;
 }
 
 export function labelFileKind(fileName: string): "jsonl" | "txt" {

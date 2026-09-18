@@ -773,21 +773,23 @@ input,
   cursor: nwse-resize;
 }
 
-/* Original annotations: an untouched one is a grey dashed outline; accepting
-   it hands the box to the document, which draws it solid and cyan. */
+/* Original annotations: a grey dashed outline, drawn purely as a reference.
+   The layer only takes pointer events while a box is being added or the
+   originals themselves are edited, so the hover styles below can only ever
+   show up in those two modes. */
 .reference-bbox {
   /* Faintly filled rather than empty: the fill is what makes the whole box
-     clickable to accept it, not just its dashed edge. */
+     clickable to copy it, not just its dashed edge. */
   fill: rgb(148 163 184 / 5%);
   stroke: #94a3b8;
   stroke-width: 1.5;
   stroke-dasharray: 7 5;
-  cursor: pointer;
 }
 
 .reference-bbox:hover {
   fill: rgb(148 163 184 / 12%);
   stroke: #e2e8f0;
+  cursor: pointer;
 }
 
 .reference-bbox.is-selected {
@@ -797,65 +799,21 @@ input,
   stroke-dasharray: none;
 }
 
-.reference-bar {
-  position: absolute;
-  top: var(--space-sm);
-  left: 50%;
-  z-index: 11;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-sm);
-  max-width: calc(100% - 24px);
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text);
-  background: rgb(255 255 255 / 96%);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-panel);
-  transform: translateX(-50%);
-}
-
-.reference-bar.is-editing {
-  border-color: var(--selection);
-}
-
-.reference-count b {
-  color: var(--accent-strong);
-  font-variant-numeric: tabular-nums;
-}
-
-.reference-file {
-  max-width: 220px;
-  overflow: hidden;
-  color: var(--text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reference-hint {
-  color: var(--text-muted);
-}
-
-.reference-selected {
+.originals-editor {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
 }
 
-.reference-selected-id {
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.reference-selected label {
+.originals-editor label {
   display: flex;
   align-items: center;
   gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
-.reference-selected input {
+.originals-editor input {
   width: 200px;
   padding: 3px 6px;
   font: inherit;
@@ -866,25 +824,9 @@ input,
   border-radius: var(--space-xs);
 }
 
-.reference-bar button {
-  padding: 4px 9px;
-  font: inherit;
+.originals-hint {
   font-size: 12px;
-  color: var(--text);
-  background: var(--panel-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--space-xs);
-  cursor: pointer;
-}
-
-.reference-bar button:hover {
-  background: #fff;
-}
-
-.reference-edit-toggle[aria-pressed="true"] {
-  color: #111827;
-  background: var(--selection);
-  border-color: var(--selection);
+  color: var(--text-muted);
 }
 
 .annotation-label-text {

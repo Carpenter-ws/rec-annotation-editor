@@ -1,6 +1,11 @@
-import { isJsonlLabelFile, parseJsonlAnnotations, type JsonlScale } from "./jsonl";
+import {
+  isJsonlLabelFile,
+  parseJsonlAnnotations,
+  scaleAnnotationsToPixels,
+  type JsonlScale,
+} from "./jsonl";
 import { parseAnnotationText } from "./parser";
-import type { ParseIssue, ReferenceBox } from "./types";
+import type { ParseIssue, ParseResult, ReferenceBox } from "./types";
 
 /** Prefix that keeps original boxes out of the document's `ann_` id space. */
 export const REFERENCE_ID_PREFIX = "ref_";
@@ -28,8 +33,24 @@ export function nextReferenceId(boxes: readonly ReferenceBox[]): string {
 }
 
 /**
- * Reads an original-annotation file. A TXT line holds pixel coordinates, while
- * a JSONL target is normalized, so the image size is needed for the latter.
+ * TXT originals carry the same [0, 1000] grid as REC targets, so they are
+ * converted exactly like a JSONL line instead of being read as pixels.
+ */
+function scaleTextAnnotations(
+  result: ParseResult,
+  scale?: JsonlScale | null,
+): ParseResult {
+  if (!scale) return result;
+  return {
+    ...result,
+    annotations: scaleAnnotationsToPixels(result.annotations, scale),
+  };
+}
+
+/**
+ * Reads an original-annotation file. Both formats are normalized to [0, 1000]
+ * over the image, so `scale` is what turns them into pixels; without it the
+ * raw values are kept as they are.
  */
 export function parseReferenceBoxes(
   text: string,
@@ -38,7 +59,7 @@ export function parseReferenceBoxes(
 ): ReferenceParseResult {
   const parsed = isJsonlLabelFile(fileName)
     ? parseJsonlAnnotations(text, scale)
-    : parseAnnotationText(text);
+    : scaleTextAnnotations(parseAnnotationText(text), scale);
 
   return {
     boxes: parsed.annotations.map((annotation, index) => ({

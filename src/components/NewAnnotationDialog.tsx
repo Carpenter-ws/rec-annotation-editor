@@ -1,15 +1,18 @@
 import { useEffect, useState, type JSX } from "react";
 
 export interface NewAnnotationDialogProps {
+  /** Expression the dialog starts with, e.g. the label of an original. */
+  initialLabel?: string;
   onAdd: (label: string) => void;
   onCancel: () => void;
 }
 
 export function NewAnnotationDialog({
+  initialLabel = "",
   onAdd,
   onCancel,
 }: NewAnnotationDialogProps): JSX.Element {
-  const [label, setLabel] = useState("");
+  const [label, setLabel] = useState(initialLabel);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

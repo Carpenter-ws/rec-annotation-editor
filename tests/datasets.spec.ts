@@ -65,6 +65,10 @@ test("switches between images of one dataset", async ({ page }) => {
 
   const row = dialog.locator('[data-dataset-name="e2e-nav"]');
   const fileInput = row.getByLabel("Choose dataset files for e2e-nav");
+  // Creating the dataset briefly locks the dialog (its file input is disabled
+  // until the operation lands): choosing files in that window is ignored, so
+  // wait for the dialog to be ready the way a user has to.
+  await expect(fileInput).toBeEnabled();
   const image = await readFile(example("rec-aerial-scene.svg"));
   const labels = await readFile(example("rec-aerial-scene.txt"), "utf8");
   const secondLabels = labels.replaceAll("person", "vehicle");

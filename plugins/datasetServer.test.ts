@@ -107,7 +107,7 @@ describe("dataset middleware", () => {
       items: { stem: string; image: string; labels: string }[];
     };
     expect(manifest.items).toEqual([
-      { stem: "a", image: "a.jpg", labels: "a.jsonl" },
+      { stem: "a", image: "a.jpg", labels: "a.jsonl", originals: null },
     ]);
 
     expect(
@@ -140,7 +140,7 @@ describe("dataset middleware", () => {
     });
     expect(imagesOnly.status).toBe(200);
     expect(((await imagesOnly.json()) as { items: unknown[] }).items).toEqual([
-      { stem: "a", image: "a.jpg", labels: null },
+      { stem: "a", image: "a.jpg", labels: null, originals: null },
     ]);
 
     const labelsOnly = await fetch(`${baseUrl}/api/datasets/dji/items`, {
@@ -159,7 +159,7 @@ describe("dataset middleware", () => {
     });
     expect(labelsOnly.status).toBe(200);
     expect(((await labelsOnly.json()) as { items: unknown[] }).items).toEqual([
-      { stem: "a", image: "a.jpg", labels: "a.jsonl" },
+      { stem: "a", image: "a.jpg", labels: "a.jsonl", originals: null },
     ]);
     expect(
       fs.readFileSync(path.join(rootDir, "dji", "labels", "a.jsonl"), "utf8"),
@@ -192,8 +192,111 @@ describe("dataset middleware", () => {
       items: unknown[];
     }[];
     expect(datasets).toEqual([
-      { name: "dji", items: [{ stem: "a", image: "a.jpg", labels: "a.jsonl" }] },
+      {
+        name: "dji",
+        items: [
+          { stem: "a", image: "a.jpg", labels: "a.jsonl", originals: null },
+        ],
+      },
     ]);
+  });
+
+  it("pairs originals dropped beside the labels and serves them", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+    fs.writeFileSync(
+      path.join(rootDir, "dji", "originals", "a.txt"),
+      "1 2 3 4 boat\n",
+      "utf8",
+    );
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const datasets = (await response.json()) as {
+      items: { stem: string; originals: string | null }[];
+    }[];
+    expect(datasets[0]?.items).toEqual([
+      {
+        stem: "a",
+        image: "a.jpg",
+        labels: "a.jsonl",
+        originals: "a.txt",
+      },
+    ]);
+
+    const original = await fetch(`${baseUrl}/datasets/dji/originals/a.txt`);
+    expect(original.status).toBe(200);
+    expect(await original.text()).toBe("1 2 3 4 boat\n");
+  });
+
+  it("reads a manifest that was saved with a BOM", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+    const manifestPath = path.join(rootDir, "dji", "dataset.json");
+    fs.writeFileSync(
+      manifestPath,
+      `\uFEFF${fs.readFileSync(manifestPath, "utf8")}`,
+      "utf8",
+    );
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const [dataset] = (await response.json()) as { items: { stem: string }[] }[];
+    expect(dataset?.items).toHaveLength(1);
+    expect(dataset?.items[0]?.stem).toBe("a");
+  });
+
+  it("re-pairs an item whose recorded label file no longer exists", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+    // An earlier import left a .txt name behind while the disk kept the .jsonl.
+    const manifestPath = path.join(rootDir, "dji", "dataset.json");
+    const stale = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      items: { stem: string; image: string; labels: string | null }[];
+    };
+    stale.items[0]!.labels = "a.txt";
+    fs.writeFileSync(manifestPath, JSON.stringify(stale), "utf8");
+
+    const listResponse = await fetch(`${baseUrl}/api/datasets`);
+    const [dataset] = (await listResponse.json()) as {
+      items: { labels: string | null }[];
+    }[];
+    expect(dataset?.items[0]?.labels).toBe("a.jsonl");
+
+    // Opening works, and so does saving: both follow the repaired name.
+    const missing = await fetch(`${baseUrl}/datasets/dji/labels/a.txt`);
+    expect(missing.status).toBe(404);
+    const served = await fetch(`${baseUrl}/datasets/dji/labels/a.jsonl`);
+    expect(served.status).toBe(200);
+
+    const saved = await fetch(`${baseUrl}/api/datasets/dji/labels/a.jsonl`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain" },
+      body: '{"expression": "repaired", "targets": []}',
+    });
+    expect(saved.status).toBe(204);
+    expect(
+      fs.readFileSync(path.join(rootDir, "dji", "labels", "a.jsonl"), "utf8"),
+    ).toContain('"repaired"');
+
+    // The repair is persisted, not redone on every request.
+    const healed = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      items: { labels: string | null }[];
+    };
+    expect(healed.items[0]?.labels).toBe("a.jsonl");
+  });
+
+  it("leaves originals empty for items that have none", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const datasets = (await response.json()) as {
+      items: { originals: string | null }[];
+    }[];
+    expect(datasets[0]?.items[0]?.originals).toBeNull();
+
+    // Only the three dataset folders are served.
+    const other = await fetch(`${baseUrl}/datasets/dji/notes/a.txt`);
+    expect(other.status).toBe(404);
   });
 
   it("writes label edits back to the dataset file", async () => {
@@ -236,7 +339,7 @@ describe("dataset middleware", () => {
       fs.readFileSync(path.join(rootDir, "dji", "dataset.json"), "utf8"),
     ) as { items: { stem: string; image: string | null; labels: string | null }[] };
     expect(manifest.items).toEqual([
-      { stem: "a", image: "a.jpg", labels: "a.txt" },
+      { stem: "a", image: "a.jpg", labels: "a.txt", originals: null },
     ]);
 
     // A label file that matches no item is still rejected.

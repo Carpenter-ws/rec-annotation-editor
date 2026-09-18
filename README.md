@@ -179,32 +179,52 @@ backend):
 ## Original annotations (a pool to pick new boxes from)
 
 **Open originals** in the toolbar (or drop the file onto the canvas) loads an
-original annotation file — TXT in pixels, JSONL normalized like a label file —
-and shows it as a layer to pick from. The originals are **not part of the
-document**: nothing is saved or exported until a box is accepted, and the file
-itself is never written back by the editor.
+original annotation file — a TXT of `x1 y1 x2 y2 label` lines or a JSONL — and
+shows it as a layer to pick from. Both store their boxes on the **same
+normalized `[0, 1000]` grid** as the dataset labels, so they are converted to
+image pixels on load (that is why an original has to be read with an image
+open). The originals are **nothing but a reference for adding boxes**: they
+never join the document on their own, the file is never written back, and
+adding or deleting document boxes (or whole expressions) never changes them.
 
-- **untouched original** — a grey dashed box; click it to accept it, and its box
-  joins the document under the label it carries (the label's level comes along
-  when the document already knows it)
-- **accepted** — the document box takes over the canvas in solid cyan, and it
-  stays drawn even when no category is picked, so the result of picking stays
-  readable next to the dashed ones
-- **deleting it hands the original back** — the dashed box returns exactly as it
-  was, whichever way the box was removed (card `×`, `Delete`, or deleting the
-  whole expression)
-- the bar above the canvas counts the picks (`Original 3 / 12 added`), names the
-  file, and clears the layer;
-- **Edit original annotations** unlocks the layer itself: while it is on, a
-  click selects an original instead of accepting it, and it can be dragged,
-  resized, relabelled (`Expression` field in the bar), drawn (`Add box`), and
-  deleted (`Delete box`, or `Delete`). The mode has to be on for any of that —
-  outside it a drag on an original does nothing at all.
+A dataset can also ship its originals: drop them into `originals/<stem>.txt` of
+the dataset folder and every matching item loads its own pool automatically as
+it opens (the folder is matched by stem, no import step needed).
+
+- **untouched original** — a grey dashed box. It only reacts while a box is
+  being **added**: click it then and its coordinates join the box being created
+  (see below for the two ways that happens). Outside the add and edit modes the
+  layer is completely inert — no click does anything, no hovering highlights
+  anything, and clicks, drags and the wheel reach the image underneath so
+  panning and zooming behave as if no originals were loaded. An original also
+  keeps its exact place whatever happens to the document, so the same reference
+  can be used again after its box was deleted.
+- **adding from an original** — with a category armed (`Add` on a category
+  header) the click joins **that** expression, so a batch of references can be
+  collected into the expression being annotated; in plain **Add box** mode it
+  opens the usual **New annotation** dialog prefilled with the expression the
+  reference carries, so nothing is added before it is confirmed.
+- **the copy** — a solid document box, drawn even when no category is isolated
+  so the picks stay readable next to the dashed references.
+- **Hide originals / Show originals** in the toolbar switches the layer off and
+  back on at any time — hiding is never destructive, and starting a new box
+  (`Add box`, a category `Add`, or dragging on the canvas) brings the layer
+  back by itself.
+- **Edit originals** in the toolbar unlocks the layer itself: while it is on, a
+  click selects an original instead of copying it, and it can be dragged,
+  resized, drawn (`Add box`) or deleted (`Delete box` in the toolbar, or
+  `Delete`). The selected one shows its `Expression` field right next to the
+  toolbar toggle, so a reference can be relabelled before it is copied. The
+  mode has to be on for any of that — outside it a drag on an original does
+  nothing at all.
+- nothing floats over the image: the layer has no bar of its own, its controls
+  live in the toolbar.
 
 The pool belongs to the document that is open: importing another image or label
 file, or opening another dataset item, clears it. Exporting and saving never
 include it, and the link to an original is not written to the file, so a
-reloaded document starts with an empty pool.
+reloaded document starts with an empty pool. Which originals were already copied
+is derived from the document at that moment — nothing about the layer is stored.
 
 ## REC JSONL format
 

@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type JSX } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type JSX } from "react";
 
 export interface ToolbarProps {
   /** Back to the dataset home. */
@@ -12,6 +12,18 @@ export interface ToolbarProps {
   onPickLabels: () => void;
   /** Original annotations, loaded as a pool to pick new boxes from. */
   onOpenOriginals: (file: File) => void;
+  /** True while any originals are loaded: only then do the two toggles apply. */
+  originalsLoaded: boolean;
+  /** Whether the originals are drawn on the canvas. */
+  originalsVisible: boolean;
+  /** Whether the originals themselves may be moved, relabeled, or deleted. */
+  originalsEditing: boolean;
+  onToggleOriginalsVisible: () => void;
+  onToggleOriginalsEditing: () => void;
+  /** The original selected while editing, edited right here in the toolbar. */
+  selectedOriginal: { id: string; label: string } | null;
+  onRenameOriginal: (label: string) => void;
+  onDeleteOriginal: () => void;
   onOpenDatasets: () => void;
   onSave: () => void;
   onSaveAs: () => void;
@@ -53,6 +65,14 @@ export function Toolbar({
   onOpenLabels,
   onPickLabels,
   onOpenOriginals,
+  originalsLoaded,
+  originalsVisible,
+  originalsEditing,
+  onToggleOriginalsVisible,
+  onToggleOriginalsEditing,
+  selectedOriginal,
+  onRenameOriginal,
+  onDeleteOriginal,
   onOpenDatasets,
   onSave,
   onSaveAs,
@@ -81,6 +101,25 @@ export function Toolbar({
   const labelInputRef = useRef<HTMLInputElement>(null);
   const originalInputRef = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  /** Expression draft of the original being relabelled in the toolbar. */
+  const [draft, setDraft] = useState<string | null>(null);
+  const draftRef = useRef<string | null>(null);
+  const selectedOriginalId = selectedOriginal?.id ?? null;
+
+  useEffect(() => {
+    draftRef.current = null;
+    setDraft(null);
+  }, [selectedOriginalId]);
+
+  const commitDraft = () => {
+    const value = draftRef.current;
+    draftRef.current = null;
+    setDraft(null);
+    if (value === null || !selectedOriginal) return;
+    const label = value.trim();
+    if (label === "" || label === selectedOriginal.label) return;
+    onRenameOriginal(label);
+  };
 
   const forwardFile = (
     event: ChangeEvent<HTMLInputElement>,
@@ -144,6 +183,71 @@ export function Toolbar({
           hidden
           onChange={(event) => forwardFile(event, onOpenOriginals)}
         />
+        <button
+          type="button"
+          aria-pressed={originalsVisible}
+          disabled={!originalsLoaded}
+          title={
+            originalsVisible
+              ? "Hide the original annotations (adding a box brings them back)"
+              : "Show the original annotations again"
+          }
+          onClick={onToggleOriginalsVisible}
+        >
+          {originalsVisible ? "Hide originals" : "Show originals"}
+        </button>
+        <button
+          type="button"
+          aria-pressed={originalsEditing}
+          disabled={!originalsLoaded}
+          title="Move, resize, relabel, add or delete the original annotations"
+          onClick={onToggleOriginalsEditing}
+        >
+          {originalsEditing ? "Done editing originals" : "Edit originals"}
+        </button>
+        {originalsEditing ? (
+          selectedOriginal ? (
+            <span className="originals-editor">
+              <label>
+                Expression
+                <input
+                  type="text"
+                  aria-label={`Expression of ${selectedOriginal.id}`}
+                  value={draft ?? selectedOriginal.label}
+                  onChange={(event) => {
+                    draftRef.current = event.currentTarget.value;
+                    setDraft(draftRef.current);
+                  }}
+                  onBlur={commitDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      draftRef.current = null;
+                      setDraft(null);
+                      event.currentTarget.blur();
+                      return;
+                    }
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    commitDraft();
+                    event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                aria-label={`Delete original ${selectedOriginal.id}`}
+                onClick={onDeleteOriginal}
+              >
+                Delete box
+              </button>
+            </span>
+          ) : (
+            <span className="originals-hint">
+              Click an original to edit it — drag to move, drag a handle to resize
+            </span>
+          )
+        ) : null}
         <button type="button" onClick={onOpenDatasets}>
           Datasets
         </button>

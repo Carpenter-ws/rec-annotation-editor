@@ -99,8 +99,11 @@ export interface ViewportProps {
   initialTransform?: ViewTransform;
   /** Original annotations the annotator picks from; never part of the document. */
   referenceBoxes?: readonly ReferenceBox[];
-  /** Originals already accepted, drawn by their document box instead. */
-  acceptedReferenceIds?: ReadonlySet<string>;
+  /**
+   * Whether the originals are drawn at all. They are a pure reference for
+   * adding boxes, so picking one changes nothing about the layer itself.
+   */
+  referenceVisible?: boolean;
   /** While true the originals themselves can be moved, resized, or deleted. */
   referenceEditing?: boolean;
   selectedReferenceId?: string | null;
@@ -225,7 +228,6 @@ function AnnotationBox({
           .filter(Boolean)
           .join(" ")}
         data-testid={isReference ? `ref-${annotation.id}` : `bbox-${annotation.id}`}
-        data-state={isReference ? "pending" : undefined}
         data-selected={selected ? "true" : "false"}
         data-highlighted={highlighted ? "true" : "false"}
         x={x1}
@@ -277,7 +279,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     onDraftBox,
     initialTransform,
     referenceBoxes = [],
-    acceptedReferenceIds,
+    referenceVisible = true,
     referenceEditing = false,
     selectedReferenceId = null,
     onReferencePick,
@@ -738,6 +740,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   };
 
   const renderedAnnotations = annotations;
+  /** The originals only take part in these two modes; elsewhere they are inert. */
+  const referenceInteractive = referenceEditing || mode === "add";
 
   const startMove = (
     event: PointerEvent<SVGGElement>,
@@ -799,6 +803,13 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     event: PointerEvent<SVGGElement>,
     box: ReferenceBox,
   ) => {
+    // While a box is being added the click on an original is what copies it.
+    // Holding the pointer here keeps the canvas from starting a draw that would
+    // capture the pointer and swallow that click.
+    if (mode === "add") {
+      event.stopPropagation();
+      return;
+    }
     if (
       !referenceEditing ||
       event.button !== 0 ||
@@ -882,17 +893,18 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
           aria-label={image.name}
           role="img"
         />
-        {referenceBoxes.length > 0 ? (
-          <g data-testid="reference-layer">
+        {referenceVisible && referenceBoxes.length > 0 ? (
+          <g
+            data-testid="reference-layer"
+            data-interactive={referenceInteractive}
+            // Outside the two modes that work with the originals the layer is
+            // inert: clicks, drags and the wheel reach the image underneath, so
+            // panning and zooming behave as if no originals were loaded.
+            pointerEvents={referenceInteractive ? "auto" : "none"}
+          >
             {referenceBoxes.map((box) => {
-              // An accepted original is represented by its own document box,
-              // except while the originals are being edited.
-              if (
-                !referenceEditing &&
-                (acceptedReferenceIds?.has(box.id) ?? false)
-              ) {
-                return null;
-              }
+              // Every original is drawn exactly where it is, whether or not it
+              // was already added to the document: the layer never changes.
               const draft =
                 referenceDraft?.id === box.id ? referenceDraft.bbox : box.bbox;
               const selected =
@@ -911,11 +923,16 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
                   highlighted={false}
                   scale={transform.scale}
                   onSelect={(event) => {
-                    event.stopPropagation();
+                    // Editing picks an original to work on; adding copies its
+                    // coordinates into the box being drawn. Anywhere else a
+                    // click on the layer is ignored.
                     if (referenceEditing) {
+                      event.stopPropagation();
                       onReferenceSelect?.(box.id);
                       return;
                     }
+                    if (mode !== "add") return;
+                    event.stopPropagation();
                     onReferencePick?.(box.id);
                   }}
                   onPointerDown={(event) => startReferenceMove(event, box)}

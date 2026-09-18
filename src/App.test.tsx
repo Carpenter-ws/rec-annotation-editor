@@ -1483,10 +1483,14 @@ it("gives each dropped file its role and reports the rest as rejected", async ()
   });
 
   expect(await screen.findByText("first label")).toBeVisible();
-  // The second label file becomes the picking pool instead of being rejected.
-  expect(
-    await screen.findByRole("group", { name: "Original annotations" }),
-  ).toHaveTextContent("Original 0 / 1 added");
+  // The second label file becomes the picking pool instead of being rejected,
+  // which the toolbar reports by enabling its originals switches.
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Hide originals" })).toBeEnabled(),
+  );
+  expect(screen.getByTestId("editor-notice")).toHaveTextContent(
+    'Loaded 1 original annotation from "extra.TXT"',
+  );
   const dialog = await screen.findByRole("dialog", {
     name: "Some dropped files were rejected",
   });
@@ -1494,7 +1498,48 @@ it("gives each dropped file its role and reports the rest as rejected", async ()
   expect(dialog).not.toHaveTextContent("extra.TXT");
 });
 
-it("accepts an original annotation on click and hands it back when deleted", async () => {
+it("leaves the originals alone outside the add and edit modes", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  await showCards(user);
+  await user.upload(
+    screen.getByLabelText("Open original annotations"),
+    textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
+  );
+
+  expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
+  // Nothing is being added, so the layer takes no pointer events at all.
+  expect(screen.getByTestId("reference-layer")).toHaveAttribute(
+    "data-interactive",
+    "false",
+  );
+
+  fireEvent.click(screen.getByTestId("ref-ref_001"));
+
+  // No box, no dialog, no toast, no selection: the click went nowhere.
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+  expect(
+    screen.queryByRole("dialog", { name: "New annotation" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByTestId("add-toast")).not.toBeInTheDocument();
+  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute(
+    "data-selected",
+    "false",
+  );
+});
+
+it("joins the armed expression when an original is clicked while adding", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
@@ -1515,59 +1560,95 @@ it("accepts an original annotation on click and hands it back when deleted", asy
     screen.getByLabelText("Open original annotations"),
     textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
   );
+  expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
 
-  // The originals arrive untouched: nothing was added to the document yet.
-  const bar = await screen.findByRole("group", {
-    name: "Original annotations",
-  });
-  expect(bar).toHaveTextContent("Original 0 / 2 added");
-  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute(
-    "data-state",
-    "pending",
+  // Arming a category is what makes the originals clickable.
+  await user.click(screen.getByRole("button", { name: "Add person box" }));
+  expect(screen.getByTestId("reference-layer")).toHaveAttribute(
+    "data-interactive",
+    "true",
   );
-  expect(screen.getByTestId("ref-ref_002")).toBeVisible();
-  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
 
-  // Clicking one accepts it: the document box takes over the canvas.
   fireEvent.click(screen.getByTestId("ref-ref_001"));
 
+  // The box joins "person", the expression being added — not the "boat" the
+  // reference carries — converted from the normalized grid (20,20 → 8,6 on a
+  // 400x300 image).
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("2 annotations"),
   );
-  expect(screen.queryByTestId("ref-ref_001")).not.toBeInTheDocument();
   const added = screen.getByTestId("bbox-ann_002");
-  expect(added).toHaveAttribute("x", "20");
-  expect(added).toHaveAttribute("width", "40");
-  expect(bar).toHaveTextContent("Original 1 / 2 added");
-
-  // Deleting the box hands the original back to the pool.
+  expect(added).toHaveAttribute("x", "8");
+  expect(added).toHaveAttribute("y", "6");
+  expect(added).toHaveAttribute("width", "16");
   const panel = screen.getByRole("complementary", { name: "Annotations" });
-  await user.click(
-    within(panel.querySelector('[data-annotation-id="ann_002"]')!).getByRole(
-      "button",
-      { name: "Delete annotation" },
-    ),
+  expect(within(panel).getByRole("button", { name: "person" })).toBeVisible();
+  expect(
+    within(panel).queryByRole("button", { name: "boat" }),
+  ).not.toBeInTheDocument();
+
+  // Clicking the same original twice would duplicate it.
+  fireEvent.click(screen.getByTestId("ref-ref_001"));
+  expect(screen.getByRole("status")).toHaveTextContent("2 annotations");
+  expect(screen.getByTestId("add-toast")).toHaveTextContent(
+    "This original is already in the document.",
   );
 
-  await waitFor(() =>
-    expect(screen.getByRole("status")).toHaveTextContent("1 annotation"),
-  );
-  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute(
-    "data-state",
-    "pending",
-  );
-  expect(bar).toHaveTextContent("Original 0 / 2 added");
+  // The originals themselves stay exactly where they were.
+  expect(screen.getByTestId("ref-ref_001")).toBeVisible();
+  expect(screen.getByTestId("ref-ref_002")).toBeVisible();
 
-  // Only the accepted box is saved; untouched originals stay out of the file.
-  await user.click(screen.getByTestId("ref-ref_002"));
+  // Only the boxes are saved; the layer is never written out.
+  fireEvent.click(screen.getByTestId("ref-ref_002"));
   await waitFor(() =>
-    expect(screen.getByRole("status")).toHaveTextContent("2 annotations"),
+    expect(screen.getByRole("status")).toHaveTextContent("3 annotations"),
   );
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
   await waitFor(() => expect(click).toHaveBeenCalledOnce());
   expect(await readBlob(blobs[1]!)).toBe(
-    "0.00 0.00 10.00 10.00 person 0\n100.00 100.00 200.00 200.00 boat 0\n",
+    "0.00 0.00 10.00 10.00 person 0\n8.00 6.00 24.00 18.00 person 0\n40.00 30.00 80.00 60.00 person 0\n",
   );
+});
+
+it("asks for the expression when an original is clicked in plain add mode", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open labels"),
+    textFile("0 0 10 10 person 0", "scene.txt"),
+  );
+  await showCards(user);
+  await user.upload(
+    screen.getByLabelText("Open original annotations"),
+    textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
+  );
+  expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "Add box" }));
+  fireEvent.click(screen.getByTestId("ref-ref_001"));
+
+  // Nothing is added before the expression is confirmed; the dialog opens with
+  // the expression the reference carries.
+  const dialog = await screen.findByRole("dialog", { name: "New annotation" });
+  expect(within(dialog).getByRole("textbox", { name: "Expression" })).toHaveValue(
+    "boat",
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+
+  await user.click(within(dialog).getByRole("button", { name: "Add" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("2 annotations"),
+  );
+  expect(screen.getByTestId("bbox-ann_002")).toHaveAttribute("x", "8");
+  expect(screen.getByTestId("ref-ref_001")).toBeVisible();
 });
 
 it("keeps the originals read-only until their editing mode is unlocked", async () => {
@@ -1603,13 +1684,11 @@ it("keeps the originals read-only until their editing mode is unlocked", async (
   });
   fireEvent.pointerMove(canvas, { pointerId: 11, clientX: 120, clientY: 120 });
   fireEvent.pointerUp(canvas, { pointerId: 11, clientX: 120, clientY: 120 });
-  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute("x", "20");
+  expect(screen.getByTestId("ref-ref_001")).toHaveAttribute("x", "8");
   expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
 
-  // Unlocking editing turns a click into a selection instead of an acceptance.
-  await user.click(
-    screen.getByRole("button", { name: "Edit original annotations" }),
-  );
+  // Unlocking editing turns a click into a selection instead of a copy.
+  await user.click(screen.getByRole("button", { name: "Edit originals" }));
   await user.click(screen.getByTestId("ref-ref_001"));
   expect(screen.getByRole("status")).toHaveTextContent("0 annotations");
   expect(
@@ -1626,7 +1705,7 @@ it("keeps the originals read-only until their editing mode is unlocked", async (
   fireEvent.pointerMove(canvas, { pointerId: 12, clientX: 140, clientY: 140 });
   fireEvent.pointerUp(canvas, { pointerId: 12, clientX: 140, clientY: 140 });
   await waitFor(() =>
-    expect(screen.getByTestId("ref-ref_001")).not.toHaveAttribute("x", "20"),
+    expect(screen.getByTestId("ref-ref_001")).not.toHaveAttribute("x", "8"),
   );
 
   const label = screen.getByLabelText("Expression of ref_001");
@@ -1637,6 +1716,91 @@ it("keeps the originals read-only until their editing mode is unlocked", async (
   await user.click(screen.getByRole("button", { name: "Delete original ref_001" }));
   expect(screen.queryByTestId("ref-ref_001")).not.toBeInTheDocument();
   expect(screen.getByTestId("ref-ref_002")).toBeVisible();
+});
+
+it("hides the originals from the toolbar and shows them again", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open original annotations"),
+    textFile("20 20 60 60 boat", "DJI_0133.txt"),
+  );
+  await screen.findByTestId("ref-ref_001");
+
+  await user.click(screen.getByRole("button", { name: "Hide originals" }));
+
+  // The layer is gone, the pool is not: the toolbar keeps the toggle.
+  expect(screen.queryByTestId("reference-layer")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Show originals" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+
+  await user.click(screen.getByRole("button", { name: "Show originals" }));
+
+  expect(screen.getByTestId("ref-ref_001")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Hide originals" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+it("brings hidden originals back as soon as a box is being added", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+  await user.upload(
+    screen.getByLabelText("Open original annotations"),
+    textFile("20 20 60 60 boat", "DJI_0133.txt"),
+  );
+  await screen.findByTestId("ref-ref_001");
+  await user.click(screen.getByRole("button", { name: "Hide originals" }));
+  expect(screen.queryByTestId("ref-ref_001")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Add box" }));
+
+  expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Hide originals" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+it("keeps both originals toggles disabled until a file is loaded", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  await renderApp();
+
+  await user.upload(
+    screen.getByLabelText("Open image"),
+    new File(["pixels"], "scene.png", { type: "image/png" }),
+  );
+
+  expect(screen.getByRole("button", { name: "Hide originals" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Edit originals" })).toBeDisabled();
+
+  await user.upload(
+    screen.getByLabelText("Open original annotations"),
+    textFile("20 20 60 60 boat", "DJI_0133.txt"),
+  );
+  await screen.findByTestId("ref-ref_001");
+
+  expect(screen.getByRole("button", { name: "Hide originals" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Edit originals" })).toBeEnabled();
 });
 
 it("clamps labels against an existing image and announces the count", async () => {
@@ -4154,6 +4318,69 @@ it("opens a dataset item, edits it, and saves it back to the dataset", async () 
   expect(screen.getByTestId("editor-notice")).toHaveTextContent(
     /dataset "dji"/,
   );
+});
+
+it("opens a dataset item with its original annotations ready to pick", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        {
+          stem: "DJI_0001",
+          image: "DJI_0001.jpg",
+          labels: "DJI_0001.jsonl",
+          originals: "DJI_0001.txt",
+        },
+      ],
+    },
+  ]);
+  mockImageEnvironment([{ width: 1000, height: 800 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      return new Response(
+        url.includes("/originals/")
+          ? "10 20 110 120 boat\n200 210 300 310 boat\n"
+          : '{"expression": "person", "targets": [[10, 20, 110, 120]]}',
+        { status: 200 },
+      );
+    }),
+  );
+  await renderApp();
+
+  await user.click(screen.getByRole("button", { name: "Datasets" }));
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  await user.click(
+    within(dialog).getByRole("button", { name: "Toggle dji items" }),
+  );
+  await user.click(
+    within(dialog).getByRole("button", { name: /Open/i }),
+  );
+
+  // The pool arrives with the item, before anything is added.
+  expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
+  expect(screen.getByTestId("editor-notice")).toHaveTextContent("DJI_0001.txt");
+  expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
+
+  // Adding a box is the only way to take a box out of the layer.
+  await user.click(screen.getByRole("button", { name: "Add box" }));
+  fireEvent.click(screen.getByTestId("ref-ref_001"));
+  const newBoxDialog = await screen.findByRole("dialog", {
+    name: "New annotation",
+  });
+  expect(
+    within(newBoxDialog).getByRole("textbox", { name: "Expression" }),
+  ).toHaveValue("boat");
+  await user.click(within(newBoxDialog).getByRole("button", { name: "Add" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent("2 annotations"),
+  );
+  expect(screen.getByTestId("ref-ref_001")).toBeVisible();
 });
 
 it("scales normalized JSONL dataset targets to image pixels and back", async () => {

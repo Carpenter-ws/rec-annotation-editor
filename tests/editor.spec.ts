@@ -26,68 +26,94 @@ test("picks boxes from the original annotations and can edit them", async ({
   await page
     .getByLabel("Open original annotations")
     .setInputFiles(example("rec-aerial-scene-originals.txt"));
-  const bar = page.getByRole("group", { name: "Original annotations" });
-  await expect(bar).toContainText("Original 0 / 3 added");
-
-  // Untouched originals are grey dashed; accepting one hands it to the document.
   const originals = page.locator('[data-testid^="ref-ref_"]');
   await expect(originals).toHaveCount(3);
+
+  // Originals are grey dashed, drawn purely as a reference.
   const dashed = await originals.first().evaluate(
     (element) => getComputedStyle(element).strokeDasharray,
   );
   expect(dashed).not.toBe("none");
 
+  // The layer can be put away and brought back from the toolbar.
+  await page.getByRole("button", { name: "Hide originals" }).click();
+  await expect(originals).toHaveCount(0);
+  await page.getByRole("button", { name: "Show originals" }).click();
+  await expect(originals).toHaveCount(3);
+
+  // A click outside the add/edit modes goes straight through the layer.
+  const idleBox = await originals.first().boundingBox();
+  if (!idleBox) throw new Error("original annotation is not visible");
+  await page.mouse.click(
+    idleBox.x + idleBox.width / 2,
+    idleBox.y + idleBox.height / 2,
+  );
+  await expect(page.getByRole("status")).toContainText("24 annotations");
+  await expect(page.getByRole("dialog", { name: "New annotation" })).toHaveCount(
+    0,
+  );
+
+  // Adding a box is what turns the layer into a source of boxes: the click asks
+  // for the expression, prefilled with the one the original carries.
+  await page.getByRole("button", { name: "Add box" }).click();
   await originals.first().click();
-  await expect(bar).toContainText("Original 1 / 3 added");
+  const newBox = page.getByRole("dialog", { name: "New annotation" });
+  await expect(newBox.getByLabel("Expression")).toHaveValue("boat");
+  await newBox.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByRole("status")).toContainText("25 annotations");
   const accepted = page.locator('[data-testid^="bbox-"]').last();
   // Deselect, so the accepted box shows its resting cyan instead of the
   // selection highlight.
   await page.locator(".viewport-svg").click({ position: { x: 6, y: 6 } });
   await expect(accepted).toHaveCSS("stroke", "rgb(34, 211, 238)");
   await expect(accepted).toHaveCSS("stroke-dasharray", "none");
+  // The original it came from is still there, in place.
+  await expect(originals).toHaveCount(3);
 
-  // Deleting it hands the original back.
+  // Deleting the document box leaves the layer alone too.
   await page
     .locator('[data-annotation-id="ann_025"]')
     .getByRole("button", { name: "Delete annotation" })
     .click();
-  await expect(bar).toContainText("Original 0 / 3 added");
+  await expect(page.getByRole("status")).toContainText("24 annotations");
   await expect(originals).toHaveCount(3);
 
   // Originals are read-only until their editing mode is unlocked.
   const first = originals.first();
   const lockedBox = await first.boundingBox();
+  if (!lockedBox) throw new Error("original annotation is not visible");
   await page.mouse.move(lockedBox.x + 5, lockedBox.y + 5);
   await page.mouse.down();
   await page.mouse.move(lockedBox.x + 60, lockedBox.y + 50, { steps: 4 });
   await page.mouse.up();
-  expect(Math.round((await first.boundingBox()).x)).toBe(
-    Math.round(lockedBox.x),
-  );
+  const afterLockedDrag = await first.boundingBox();
+  if (!afterLockedDrag) throw new Error("original annotation is not visible");
+  expect(Math.round(afterLockedDrag.x)).toBe(Math.round(lockedBox.x));
 
-  await page
-    .getByRole("button", { name: "Edit original annotations" })
-    .click();
+  await page.getByRole("button", { name: "Edit originals" }).click();
   await first.click();
   await expect(page.getByLabel("Expression of ref_001")).toHaveValue("boat");
   await page.getByLabel("Expression of ref_001").fill("the moored boat");
   await page.getByLabel("Expression of ref_001").blur();
 
   const editableBox = await first.boundingBox();
+  if (!editableBox) throw new Error("original annotation is not visible");
   await page.mouse.move(editableBox.x + 5, editableBox.y + 5);
   await page.mouse.down();
   await page.mouse.move(editableBox.x + 70, editableBox.y + 60, { steps: 4 });
   await page.mouse.up();
-  expect(Math.round((await first.boundingBox()).x)).not.toBe(
-    Math.round(editableBox.x),
-  );
+  const afterEditableDrag = await first.boundingBox();
+  if (!afterEditableDrag) throw new Error("original annotation is not visible");
+  expect(Math.round(afterEditableDrag.x)).not.toBe(Math.round(editableBox.x));
 
   await page.getByRole("button", { name: "Delete original ref_001" }).click();
   await expect(originals).toHaveCount(2);
-  await page
-    .getByRole("button", { name: "Done editing originals" })
-    .click();
-  await expect(bar).toContainText("Original 0 / 2 added");
+  await page.getByRole("button", { name: "Done editing originals" }).click();
+
+  // Leaving the mode takes the originals editor out of the toolbar again.
+  await expect(page.getByLabel("Expression of ref_002")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit originals" })).toBeVisible();
+  await expect(originals).toHaveCount(2);
 });
 
 test("edits a complete REC document without coordinate drift", async ({

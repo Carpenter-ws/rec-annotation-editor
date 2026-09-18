@@ -9,6 +9,11 @@ export interface ManifestItem {
   image: string | null;
   /** File name once uploaded, or null while only the image exists. */
   labels: string | null;
+  /**
+   * Original annotations paired by stem, read from the dataset's `originals/`
+   * folder. They are a picking pool, so they can also be dropped in by hand.
+   */
+  originals?: string | null;
 }
 
 export interface Manifest {
@@ -84,9 +89,12 @@ export function resolveWithin(
 
 export function readManifest(datasetDir: string, name: string): Manifest {
   try {
-    const parsed = JSON.parse(
-      fs.readFileSync(path.join(datasetDir, "dataset.json"), "utf8"),
-    ) as Manifest;
+    // Hand-edited manifests often carry a BOM (Notepad and PowerShell write
+    // one); JSON.parse rejects it, which would empty the whole dataset.
+    const raw = fs
+      .readFileSync(path.join(datasetDir, "dataset.json"), "utf8")
+      .replace(/^\uFEFF/, "");
+    const parsed = JSON.parse(raw) as Manifest;
     if (parsed && parsed.name === name && Array.isArray(parsed.items)) {
       return parsed;
     }
@@ -154,6 +162,91 @@ function stemOf(fileName: string): string {
   return fileName.replace(/\.[^./\\]+$/, "");
 }
 
+/** Folders a dataset exposes over HTTP, each holding one role of the item. */
+const DATASET_FOLDERS = ["images", "labels", "originals"] as const;
+
+type DatasetFolder = (typeof DATASET_FOLDERS)[number];
+
+const FOLDER_EXTENSIONS: Record<DatasetFolder, ReadonlySet<string>> = {
+  images: IMAGE_EXTENSIONS,
+  labels: LABEL_EXTENSIONS,
+  originals: LABEL_EXTENSIONS,
+};
+
+/** Each folder owns one item field; the images folder holds a single image. */
+const ITEM_KEYS: Record<DatasetFolder, "image" | "labels" | "originals"> = {
+  images: "image",
+  labels: "labels",
+  originals: "originals",
+};
+
+/** Stems mapped to the stored file names of one dataset folder. */
+function filesByStem(
+  datasetDir: string,
+  folder: DatasetFolder,
+): Map<string, string> {
+  const byStem = new Map<string, string>();
+  try {
+    for (const name of fs.readdirSync(path.join(datasetDir, folder))) {
+      if (!FOLDER_EXTENSIONS[folder].has(path.extname(name).toLowerCase())) {
+        continue;
+      }
+      const stem = stemOf(name);
+      if (!byStem.has(stem)) byStem.set(stem, name);
+    }
+  } catch {
+    // Missing folder: nothing is stored under it yet.
+  }
+  return byStem;
+}
+
+/**
+ * Re-pairs every item with the files that are actually on disk. A manifest can
+ * name a file that has since been replaced by the same-stem file in another
+ * extension (say a `.txt` export swapped for the `.jsonl` one); keeping that
+ * stale name makes the item 404 on open and rejects its saves. Resolved
+ * changes are written back so the dataset heals on the next request.
+ */
+export function reconcileManifest(
+  datasetDir: string,
+  manifest: Manifest,
+): Manifest {
+  const listings: Record<DatasetFolder, Map<string, string>> = {
+    images: filesByStem(datasetDir, "images"),
+    labels: filesByStem(datasetDir, "labels"),
+    originals: filesByStem(datasetDir, "originals"),
+  };
+
+  let changed = false;
+  const items = manifest.items.map((item) => {
+    const next: ManifestItem = { ...item };
+    for (const folder of DATASET_FOLDERS) {
+      const key = ITEM_KEYS[folder];
+      const recorded = next[key] ?? null;
+      const recordedPath =
+        recorded === null ? null : resolveWithin(datasetDir, folder, recorded);
+      const stored =
+        recordedPath !== null && fs.existsSync(recordedPath)
+          ? recorded
+          : (listings[folder].get(item.stem) ?? null);
+      // Older manifests lack a field entirely; writing the canonical shape back
+      // keeps the stored file and the served one in sync.
+      if (stored !== recorded || !(key in next)) changed = true;
+      next[key] = stored;
+    }
+    return next;
+  });
+
+  const reconciled: Manifest = { ...manifest, items };
+  if (changed) writeManifest(datasetDir, reconciled);
+  return reconciled;
+}
+
+/** Reads the manifest and hands back the version that matches the disk. */
+function loadManifest(datasetDir: string, name: string): Manifest {
+  return reconcileManifest(datasetDir, readManifest(datasetDir, name));
+}
+
 export function createDatasetMiddleware(rootDir: string) {
   fs.mkdirSync(rootDir, { recursive: true });
 
@@ -180,11 +273,11 @@ export function createDatasetMiddleware(rootDir: string) {
         return;
       }
       const [name, folder, fileName] = segments;
-      if (name === undefined || fileName === undefined) {
+      if (name === undefined || folder === undefined || fileName === undefined) {
         next();
         return;
       }
-      if (folder !== "images" && folder !== "labels") {
+      if (!DATASET_FOLDERS.some((allowed) => allowed === folder)) {
         next();
         return;
       }
@@ -210,9 +303,10 @@ export function createDatasetMiddleware(rootDir: string) {
           .filter((entry) =>
             fs.existsSync(path.join(rootDir, entry.name, "dataset.json")),
           )
-          .map((entry) =>
-            readManifest(path.join(rootDir, entry.name), entry.name),
-          );
+          .map((entry) => {
+            const datasetDir = path.join(rootDir, entry.name);
+            return loadManifest(datasetDir, entry.name);
+          });
         sendJson(res, 200, entries);
         return;
       }
@@ -233,6 +327,7 @@ export function createDatasetMiddleware(rootDir: string) {
         }
         fs.mkdirSync(path.join(datasetDir, "images"), { recursive: true });
         fs.mkdirSync(path.join(datasetDir, "labels"), { recursive: true });
+        fs.mkdirSync(path.join(datasetDir, "originals"), { recursive: true });
         const manifest: Manifest = { name, items: [] };
         writeManifest(datasetDir, manifest);
         sendJson(res, 201, manifest);
@@ -264,7 +359,7 @@ export function createDatasetMiddleware(rootDir: string) {
         return;
       }
 
-      const manifest = readManifest(datasetDir, name);
+      const manifest = loadManifest(datasetDir, name);
 
       if (resource === "items" && !resourceKey && method === "POST") {
         const body = JSON.parse((await readBody(req)) || "{}") as {
@@ -318,7 +413,7 @@ export function createDatasetMiddleware(rootDir: string) {
           const stem = stemOf(image?.name ?? labels?.name ?? "");
           let existing = manifest.items.find((entry) => entry.stem === stem);
           if (!existing) {
-            existing = { stem, image: null, labels: null };
+            existing = { stem, image: null, labels: null, originals: null };
             manifest.items.push(existing);
           }
           if (image?.name) existing.image = image.name;
@@ -335,13 +430,14 @@ export function createDatasetMiddleware(rootDir: string) {
           sendError(res, 404, "item not found");
           return;
         }
-        for (const fileName of [item.image, item.labels]) {
+        const files: readonly [string | null | undefined, string][] = [
+          [item.image, "images"],
+          [item.labels, "labels"],
+          [item.originals, "originals"],
+        ];
+        for (const [fileName, folder] of files) {
           if (!fileName) continue;
-          const filePath = resolveWithin(
-            datasetDir,
-            fileName === item.image ? "images" : "labels",
-            fileName,
-          );
+          const filePath = resolveWithin(datasetDir, folder, fileName);
           if (filePath !== null && fs.existsSync(filePath)) fs.unlinkSync(filePath);
         }
         manifest.items = manifest.items.filter(
