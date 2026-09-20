@@ -16,6 +16,12 @@ import {
   type DatasetSummary,
 } from "../app/datasetApi";
 import {
+  REVIEW_LABELS,
+  REVIEW_ORDER,
+  reviewStatusOf,
+  type ReviewStatus,
+} from "../domain/review";
+import {
   createStagedFile,
   groupStagedItems,
   markDuplicateStems,
@@ -61,6 +67,8 @@ export function DatasetDialog({
   const [newName, setNewName] = useState("");
   const [expandedName, setExpandedName] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedDatasetFile[]>([]);
+  /** Review state the item list is narrowed to; `all` shows everything. */
+  const [reviewFilter, setReviewFilter] = useState<ReviewStatus | "all">("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Staged files hold object URLs, so every drop path must be observable from
@@ -135,9 +143,15 @@ export function DatasetDialog({
 
   /** Files are read and validated locally the moment they are chosen. */
   const stageFiles = (files: readonly File[]) => {
-    if (files.length === 0 || busy) return;
+    if (files.length === 0) return;
     setSummary(null);
     setError(null);
+    // Staging while an operation is in flight would mix new files into the
+    // batch it is working on; say so instead of dropping them silently.
+    if (busy) {
+      setError("Wait for the running operation to finish, then choose again.");
+      return;
+    }
 
     const generation = ++stageGenerationRef.current;
     const skeletons = files.map((file) =>
@@ -303,6 +317,13 @@ export function DatasetDialog({
         <ul className="dataset-list">
           {datasets.map((dataset) => {
             const expanded = expandedName === dataset.name;
+            // Filtering by review state is what makes a review pass walkable:
+            // pick "待审核", work through the list, come back for "打回".
+            const visibleItems = dataset.items.filter(
+              (item: DatasetItem) =>
+                reviewFilter === "all" ||
+                reviewStatusOf(item) === reviewFilter,
+            );
             return (
               <li key={dataset.name} data-dataset-name={dataset.name}>
                 <div className="dataset-row">
@@ -461,17 +482,56 @@ export function DatasetDialog({
                           of {dataset.items.length} item(s) ready to open (an
                           image is enough; labels are created on save).
                         </p>
+                        <div className="review-filter">
+                          <span className="review-filter-label">审核意见：</span>
+                          <select
+                            aria-label={`Filter ${dataset.name} by review status`}
+                            value={reviewFilter}
+                            onChange={(event) =>
+                              setReviewFilter(
+                                event.currentTarget.value as
+                                  | ReviewStatus
+                                  | "all",
+                              )
+                            }
+                          >
+                            <option value="all">全部</option>
+                            {REVIEW_ORDER.map((status) => (
+                              <option key={status} value={status}>
+                                {REVIEW_LABELS[status]}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="review-filter-count">
+                            {visibleItems.length} / {dataset.items.length}
+                          </span>
+                        </div>
+                        {visibleItems.length === 0 ? (
+                          <p className="dataset-empty">
+                            No item carries this review status.
+                          </p>
+                        ) : null}
                         <ul className="dataset-item-list">
-                          {dataset.items.map((item: DatasetItem) => {
+                          {visibleItems.map((item: DatasetItem) => {
                             // An image alone can be opened and annotated; the
                             // labels file is created on the first save.
                             const ready = Boolean(item.image);
                             const complete =
                               item.image !== null && item.labels !== null;
+                            const status = reviewStatusOf(item);
                             return (
                               <li key={item.stem} data-item-stem={item.stem}>
                                 <span className="dataset-item-stem">
                                   {item.stem}
+                                </span>
+                                <span
+                                  className={[
+                                    "review-chip",
+                                    `is-${status}`,
+                                  ].join(" ")}
+                                  data-testid={`review-chip-${item.stem}`}
+                                >
+                                  {REVIEW_LABELS[status]}
                                 </span>
                                 <span
                                   className={

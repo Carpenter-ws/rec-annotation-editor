@@ -51,7 +51,8 @@ export type EditorAction =
   | { type: "SET_LABEL_LEVEL"; label: string; level: string | null }
   | { type: "UNDO" }
   | { type: "REDO" }
-  | { type: "MARK_SAVED" };
+  | { type: "MARK_SAVED" }
+  | { type: "MARK_SAVED_SNAPSHOT"; annotations: Annotation[] };
 
 function fingerprint(annotations: Annotation[]): string {
   return JSON.stringify(annotations);
@@ -355,6 +356,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
 
+    case "MARK_SAVED_SNAPSHOT": {
+      const savedFingerprint = fingerprint(action.annotations);
+      return { ...state, savedFingerprint, dirty: isDirty(state.annotations, savedFingerprint) };
+    }
     case "MARK_SAVED": {
       const savedFingerprint = fingerprint(state.annotations);
       return {

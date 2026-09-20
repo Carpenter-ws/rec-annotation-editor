@@ -1,10 +1,32 @@
 # REC Annotation Editor
 
-A fully local web editor for REC (Referring Expression Comprehension) bounding-box
-annotations: load an image and its TXT label file, review every referring
+A local-first web editor for REC (Referring Expression Comprehension) bounding-box
+annotations: load an image and its TXT or JSONL labels, review every referring
 expression, fix boxes by dragging or by typing exact pixel coordinates, and save
-or export the result. All processing happens in your browser — there is no
-backend, and neither images nor annotations ever leave your machine.
+or export the result. Standalone files are processed in the browser. Dataset
+mode uses a small Vite middleware on the same machine to read and write the
+project's `datasets/` directory; there is no external service or cloud upload.
+Unless you deliberately expose the development server, images and annotations
+remain on the machine running the editor.
+
+The editor has two pages: the dataset home (`/`) loads metadata and thumbnails,
+while the canvas page (`/editor`) loads the selected original image and its
+nearby neighbors. This separation keeps the home page responsive even when a
+dataset contains thousands of large images.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Project architecture](#project-architecture)
+- [Home page](#home-page-imported-datasets)
+- [Editing workflow](#workflow)
+- [Datasets and original annotations](#datasets-batch-upload-and-persistent-groups)
+- [Review decisions](#reviewing-a-dataset-审核意见)
+- [Label formats](#label-formats)
+- [Data layout and backups](#data-layout-and-backups)
+- [LAN access and persistent operation](#lan-access-and-persistent-operation)
+- [Local dataset API](#local-dataset-api)
+- [Fixtures, tests, and troubleshooting](#fixtures-and-tests)
 
 ## Quick start
 
@@ -25,6 +47,23 @@ REC_EDITOR_HOST=127.0.0.1 REC_EDITOR_PORT=8080 ./start.sh
 
 On Windows, run the script from Git Bash/WSL, or start the dev server directly:
 `npm ci --cache .npm-cache && npm run dev`.
+
+## Project architecture
+
+| Layer | Responsibility |
+| --- | --- |
+| React + TypeScript | Dataset home, canvas, annotation panel, dialogs, keyboard interaction, undo/redo, autosave state |
+| SVG viewport | Displays the original image and annotation boxes; coordinates remain in original image pixels while the view zooms and pans |
+| Vite plugin (`plugins/datasetServer.ts`) | Serves dataset metadata and files and persists imported labels, review decisions, and manifests locally |
+| Thumbnail service (`plugins/thumbnails.ts`) | Generates 480-pixel WebP previews on demand with an ETag and a per-dataset `.thumbnails/` cache |
+| `src/domain/` | Parsers, serializers, normalized JSONL conversion, box geometry, review state, and visibility rules |
+| `src/app/` | File I/O, dataset staging/API calls, image prefetch window, save queue, and browser history |
+
+The development server is part of the application in dataset mode. It is not an
+authentication boundary: anyone who can reach the bound port can read images,
+upload labels, change review decisions, or delete datasets. Bind to
+`127.0.0.1` for a single-user machine, or protect a LAN deployment with a
+firewall or a reverse proxy that provides authentication and HTTPS.
 
 ## Home page (imported datasets)
 
@@ -194,11 +233,12 @@ it opens (the folder is matched by stem, no import step needed).
 - **untouched original** — a grey dashed box. It only reacts while a box is
   being **added**: click it then and its coordinates join the box being created
   (see below for the two ways that happens). Outside the add and edit modes the
-  layer is completely inert — no click does anything, no hovering highlights
-  anything, and clicks, drags and the wheel reach the image underneath so
-  panning and zooming behave as if no originals were loaded. An original also
-  keeps its exact place whatever happens to the document, so the same reference
-  can be used again after its box was deleted.
+  layer is hidden by default. When shown outside add/edit mode it is completely
+  inert — no click does anything, no hovering highlights anything, and clicks,
+  drags and the wheel reach the image underneath so panning and zooming behave
+  as if no originals were loaded. An original also keeps its exact place
+  whatever happens to the document, so the same reference can be used again
+  after its box was deleted.
 - **adding from an original** — with a category armed (`Add` on a category
   header) the click joins **that** expression, so a batch of references can be
   collected into the expression being annotated; in plain **Add box** mode it
@@ -225,6 +265,35 @@ file, or opening another dataset item, clears it. Exporting and saving never
 include it, and the link to an original is not written to the file, so a
 reloaded document starts with an empty pool. Which originals were already copied
 is derived from the document at that moment — nothing about the layer is stored.
+
+## Reviewing a dataset (审核意见)
+
+Every image of a dataset carries exactly one review decision — **审核通过**
+(approved), **待审核** (pending, which is the default) or **打回** (rejected).
+The toolbar shows them next to the dataset navigation as a radiogroup, so one
+of the three is always selected and a click is stored straight away.
+
+- **opening a dataset continues the review pass**: `Open →` on a dataset card
+  loads the first image whose decision is still 待审核 (it falls back to the
+  first openable image once everything has been decided), and the card sums the
+  states up (`审核：待审核 12 · 通过 70 · 打回 9`);
+- **deciding moves the editor on by itself**: choosing 审核通过 or 打回 opens the
+  next image that still needs review (already decided ones are skipped, and the
+  next openable image is used once nothing else is pending; unsaved edits still
+  ask first). Choosing 待审核 is not a decision, so the editor stays where it is,
+  and at the end of the list it says there is nothing left to review;
+- **the file manager shows one chip per item** and filters the list by state
+  (`全部 / 审核通过 / 待审核 / 打回`), which is what makes a pass walkable: filter
+  待审核, work through the list, then come back for the 打回 ones;
+- **storage**: decisions live in `<dataset>/review.json`, beside `dataset.json`
+  but apart from it — the manifest says which files pair up, the review file
+  records what people decided. Only images moved away from the default are
+  listed (`{"version": 1, "items": {"0017": {"status": "rejected", "updatedAt":
+  "..."}}}`), so the file stays small and diffable, a review produced by another
+  tool can simply be dropped in, and going back to 待审核 removes the entry
+  again. Deleting an item takes its decision with it;
+- an image with no entry counts as 待审核, so a fresh import walks straight into
+  the pass.
 
 ## REC JSONL format
 
@@ -328,3 +397,156 @@ edit → draw → undo/redo → export) in Chromium against the bundled fixtures
 - **Saved file did not change** — Firefox/Safari cannot write back to the
   original file; the status bar will say `Downloaded …`, and the original file
   must be replaced manually.
+
+### Homepage thumbnails
+
+Dataset cards request 480px WebP previews from `/thumbnails/<dataset>/<image>`. Originals remain unchanged and are loaded by the annotation editor. Previews are generated on demand and cached under `datasets/<dataset>/.thumbnails/`; HTTP ETags allow browsers to reuse bytes after revalidation. Replacing the source image changes its cache key. The cache directory can be removed while the service is stopped and will be regenerated on demand.
+
+### Dataset pages and image loading
+
+The home page (`/`) only loads dataset metadata and small thumbnails. Selecting a card immediately opens `/editor?dataset=<name>&image=<stem>` with a loading indicator. Canvas URLs support refresh and browser Back/Forward. Previous/Next replaces the selected image in the current history entry, so Back returns to the previous page rather than walking through every annotation image.
+
+The canvas retains the current original plus at most seven images on each side (fifteen total). Originals are decoded before reuse; background prefetch runs at most two requests at a time, nearest images first. Neighbor prefetch starts after the current document is ready. Moving outside that window cancels pending image requests and releases the retained image elements; returning home clears the window and cancels pending annotation requests. Browser-managed HTTP cache is independent of this application window. Unsaved changes require confirmation before leaving. Local file imports use `/editor` and cannot be restored from the URL after a refresh.
+
+Panning and zooming are bounded independently on the horizontal and vertical
+axes. When the scaled image is smaller than the available canvas dimension, at
+least half of that image dimension remains visible. When the scaled image is
+larger than the canvas, at least half of the canvas dimension remains covered by
+the image. The same rule is applied after a resize and when **Fit**, zoom
+buttons, Ctrl/Cmd-wheel zoom, or **locate annotation** changes the transform.
+
+### Automatic saving and review navigation
+
+Dataset annotations and authorized native local-file handles save automatically 600 ms after an edit is committed. Pending coordinate drafts and drag transactions must finish first. Writes run in order; a successful write updates the persisted baseline, so Undo during an in-flight save is saved again correctly. Previous/Next and Home flush outstanding edits before leaving; failures retain the document and report the error. Ordinary uploaded local files have no writable handle and still use Save/export downloads.
+
+The second toolbar row holds Previous/Next and the highlighted review selector. Navigating from a pending image asks for a review choice, including keeping it pending. Confirming applies the choice and continues in the requested direction. The checkbox “本次会话不再提示” stores `rec-annotation-editor:skip-pending-review=1` in `sessionStorage`: it survives refresh in the same tab and is cleared whenever the home page is entered. Cancelling the dialog does not change that preference.
+
+## Data layout and backups
+
+Datasets are ordinary folders under `datasets/`. The file system is the source
+of truth; the server reconciles `dataset.json` with files that are added,
+replaced, or removed by an external tool when the dataset list is requested.
+
+```text
+datasets/
+└── <dataset-name>/
+    ├── images/                 # source images
+    ├── labels/                 # .txt or .jsonl annotation files
+    ├── originals/              # optional reference boxes, matched by stem
+    ├── .thumbnails/            # generated WebP cache; safe to regenerate
+    ├── dataset.json            # item-to-file manifest
+    └── review.json             # non-pending review decisions and timestamps
+
+backups/
+└── annotations_<timestamp>/
+    ├── backup-manifest.json    # optional inventory for the snapshot
+    └── datasets/                # copied dataset folders
+```
+
+An item is paired by its stem. For example, `images/0017.jpg` is paired with
+`labels/0017.jsonl` and, when present, `originals/0017.txt`. A dataset may
+contain an image without labels or labels without an image; the home page shows
+that incomplete state and the editor can still open any item with an image.
+
+The editor does not automatically delete old label files when a new extension
+is uploaded. Before large batch imports or external cleanup, make a snapshot of
+the complete `datasets/` directory, including `dataset.json` and `review.json`.
+For a simple timestamped Linux backup:
+
+```bash
+backup="backups/annotations_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$backup"
+cp -a datasets "$backup/"
+```
+
+Restore by stopping the editor, copying the desired `datasets/` snapshot back
+to the project, and starting the server again. Do not copy `.thumbnails/` if
+the backup is large; those files are derived and will be regenerated.
+
+## LAN access and persistent operation
+
+The default `start.sh` bind address is `0.0.0.0`, which allows other machines
+on reachable networks to connect. Replace `192.168.164.199` below with the
+server's address:
+
+```bash
+REC_EDITOR_HOST=0.0.0.0 REC_EDITOR_PORT=5173 ./start.sh
+```
+
+Open `http://192.168.164.199:5173/` from another computer. If the page times
+out while SSH and ping work, check the server firewall and whether the process
+is listening on the expected interface:
+
+```bash
+ss -lntp | grep 5173
+sudo ufw allow 5173/tcp
+sudo ufw status verbose
+```
+
+The application has no built-in login or access control. Only expose port 5173
+to a trusted network, or put the service behind an authenticated reverse proxy.
+For a temporary persistent session, use `tmux`:
+
+```bash
+tmux new -s rec-annotation-editor
+cd /path/to/rec-annotation-editor
+REC_EDITOR_HOST=0.0.0.0 REC_EDITOR_PORT=5173 ./start.sh
+# Press Ctrl-b, then d, to detach without stopping the server.
+tmux attach -t rec-annotation-editor
+```
+
+For a long-running host, a process manager such as systemd is preferable. A
+minimal unit (replace the user and path) is:
+
+```ini
+[Unit]
+Description=REC Annotation Editor
+After=network.target
+
+[Service]
+Type=simple
+User=sse3090
+WorkingDirectory=/path/to/rec-annotation-editor
+Environment=REC_EDITOR_HOST=0.0.0.0
+Environment=REC_EDITOR_PORT=5173
+ExecStart=/usr/bin/env bash /path/to/rec-annotation-editor/start.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save it as `/etc/systemd/system/rec-annotation-editor.service`, then run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now rec-annotation-editor
+sudo systemctl status rec-annotation-editor
+```
+
+Keep the project directory and its `datasets/` folder
+on a persistent disk; `node_modules/`, `.npm-cache/`, `dist/`, and
+`.thumbnails/` can be rebuilt or regenerated.
+
+## Local dataset API
+
+The Vite middleware is intentionally small and is meant for this application,
+not as a general public API. The main routes are:
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/datasets` | List datasets, paired items, review states, and counts used by the home page |
+| `POST` | `/api/datasets` | Create an empty dataset and its `images/`, `labels/`, and `originals/` folders |
+| `DELETE` | `/api/datasets/:name` | Delete an entire dataset after UI confirmation |
+| `POST` | `/api/datasets/:name/items` | Upload a batch of image/label pairs; pairs are merged by stem |
+| `DELETE` | `/api/datasets/:name/items/:stem` | Delete one item and its associated files and review entry |
+| `PUT` | `/api/datasets/:name/labels/:file` | Persist edited TXT/JSONL labels, including a newly created label file |
+| `PUT` | `/api/datasets/:name/review/:stem` | Set `approved`, `pending`, or `rejected` for one image |
+| `GET` | `/datasets/:name/images/:file` | Stream an original image to the canvas |
+| `GET` | `/datasets/:name/labels/:file` | Read a stored label file |
+| `GET` | `/datasets/:name/originals/:file` | Read a reference annotation file |
+| `GET` | `/thumbnails/:name/:file` | Generate or serve a cached 480-pixel WebP preview |
+
+All dataset and file names are validated as single path segments. Path
+traversal is rejected, and thumbnail generation never falls back to sending a
+large original image when conversion fails.

@@ -51,27 +51,41 @@ function clampedFitTransform(
 }
 
 /**
- * Panning may never push the image fully out of the view: at least half of
- * the scaled image must remain visible on both axes.
+ * Keep a useful overlap on each axis. When the image is smaller than the
+ * viewport, at least half of the image remains visible. Once it is zoomed
+ * larger than the viewport, at least half of the viewport remains covered by
+ * the image. This avoids both losing a small image and over-restricting a
+ * zoomed-in one.
  */
 function clampPanTransform(
   transform: ViewTransform,
   viewport: { width: number; height: number },
   image: { width: number; height: number },
 ): ViewTransform {
-  const halfWidth = (image.width * transform.scale) / 2;
-  const halfHeight = (image.height * transform.scale) / 2;
+  const scaledWidth = image.width * transform.scale;
+  const scaledHeight = image.height * transform.scale;
+  const minVisibleWidth = Math.min(scaledWidth / 2, viewport.width / 2);
+  const minVisibleHeight = Math.min(scaledHeight / 2, viewport.height / 2);
   return {
     ...transform,
     offsetX: Math.min(
-      viewport.width - halfWidth,
-      Math.max(-halfWidth, transform.offsetX),
+      viewport.width - minVisibleWidth,
+      Math.max(minVisibleWidth - scaledWidth, transform.offsetX),
     ),
     offsetY: Math.min(
-      viewport.height - halfHeight,
-      Math.max(-halfHeight, transform.offsetY),
+      viewport.height - minVisibleHeight,
+      Math.max(minVisibleHeight - scaledHeight, transform.offsetY),
     ),
   };
+}
+
+function constrainedTransform(
+  transform: ViewTransform,
+  viewport: { width: number; height: number },
+  image: { width: number; height: number },
+): ViewTransform {
+  if (viewport.width <= 0 || viewport.height <= 0) return transform;
+  return clampPanTransform(transform, viewport, image);
 }
 
 /** Commits a half-typed header draft before a canvas gesture takes over. */
@@ -373,6 +387,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
             { width, height },
           ),
         );
+      } else if (width > 0 && height > 0) {
+        setTransform((current) =>
+          constrainedTransform(current, { width, height }, image),
+        );
       }
     };
 
@@ -427,11 +445,17 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         nextScale = Math.max(transform.scale, Math.min(8, targetScale));
       }
 
-      setTransform({
-        scale: nextScale,
-        offsetX: viewport.width / 2 - ((x1 + x2) / 2) * nextScale,
-        offsetY: viewport.height / 2 - ((y1 + y2) / 2) * nextScale,
-      });
+      setTransform(
+        constrainedTransform(
+          {
+            scale: nextScale,
+            offsetX: viewport.width / 2 - ((x1 + x2) / 2) * nextScale,
+            offsetY: viewport.height / 2 - ((y1 + y2) / 2) * nextScale,
+          },
+          viewport,
+          image,
+        ),
+      );
       fitModeRef.current = false;
     },
     zoomBy(factor) {
@@ -439,10 +463,14 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       if (viewport.width <= 0 || viewport.height <= 0) return;
       const nextScale = clampScale(transform.scale * factor);
       setTransform(
-        zoomAroundPoint(
-          transform,
-          { x: viewport.width / 2, y: viewport.height / 2 },
-          nextScale,
+        constrainedTransform(
+          zoomAroundPoint(
+            transform,
+            { x: viewport.width / 2, y: viewport.height / 2 },
+            nextScale,
+          ),
+          viewport,
+          image,
         ),
       );
       fitModeRef.current = false;
@@ -471,13 +499,17 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
           transform.scale * Math.exp(-event.deltaY * 0.0015),
         );
         setTransform(
-          zoomAroundPoint(
-            transform,
-            {
-              x: event.clientX - svg.getBoundingClientRect().left,
-              y: event.clientY - svg.getBoundingClientRect().top,
-            },
-            nextScale,
+          constrainedTransform(
+            zoomAroundPoint(
+              transform,
+              {
+                x: event.clientX - svg.getBoundingClientRect().left,
+                y: event.clientY - svg.getBoundingClientRect().top,
+              },
+              nextScale,
+            ),
+            viewportSizeRef.current,
+            image,
           ),
         );
       } else {

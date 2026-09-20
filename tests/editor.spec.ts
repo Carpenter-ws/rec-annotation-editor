@@ -61,12 +61,18 @@ test("picks boxes from the original annotations and can edit them", async ({
   await expect(newBox.getByLabel("Expression")).toHaveValue("boat");
   await newBox.getByRole("button", { name: "Add" }).click();
   await expect(page.getByRole("status")).toContainText("25 annotations");
-  const accepted = page.locator('[data-testid^="bbox-"]').last();
-  // Deselect, so the accepted box shows its resting cyan instead of the
-  // selection highlight.
+
+  // The copy is an ordinary document box: once nothing is isolated it leaves
+  // the canvas again, instead of staying highlighted for good.
   await page.locator(".viewport-svg").click({ position: { x: 6, y: 6 } });
-  await expect(accepted).toHaveCSS("stroke", "rgb(34, 211, 238)");
+  await expect(page.locator('[data-testid^="bbox-"]')).toHaveCount(0);
+
+  // Isolating its expression draws it again, as a solid document box.
+  await page.getByRole("button", { name: "boat", exact: true }).click();
+  const accepted = page.locator('[data-testid^="bbox-"]').last();
+  await expect(accepted).toBeVisible();
   await expect(accepted).toHaveCSS("stroke-dasharray", "none");
+  await expect(accepted).toHaveAttribute("data-testid", "bbox-ann_025");
   // The original it came from is still there, in place.
   await expect(originals).toHaveCount(3);
 

@@ -799,6 +799,117 @@ input,
   stroke-dasharray: none;
 }
 
+/* Review state of one image: a radiogroup in the toolbar, so exactly one of
+   the three states is ever selected. */
+.review-picker {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.review-picker-label {
+  margin-right: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.review-option {
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.review-option:first-of-type {
+  border-radius: var(--space-xs) 0 0 var(--space-xs);
+}
+
+.review-option:last-of-type {
+  border-radius: 0 var(--space-xs) var(--space-xs) 0;
+}
+
+.review-option + .review-option {
+  border-left: none;
+}
+
+.review-option:hover {
+  background: #fff;
+}
+
+.review-option[aria-checked="true"] {
+  color: #fff;
+  border-color: transparent;
+}
+
+.review-option.is-approved[aria-checked="true"] {
+  background: #15803d;
+}
+
+.review-option.is-pending[aria-checked="true"] {
+  background: #b45309;
+}
+
+.review-option.is-rejected[aria-checked="true"] {
+  background: #b91c1c;
+}
+
+.review-chip {
+  padding: 1px 6px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.review-chip.is-approved {
+  color: #15803d;
+  background: rgb(21 128 61 / 10%);
+  border-color: rgb(21 128 61 / 30%);
+}
+
+.review-chip.is-pending {
+  color: #b45309;
+  background: rgb(180 83 9 / 10%);
+  border-color: rgb(180 83 9 / 30%);
+}
+
+.review-chip.is-rejected {
+  color: #b91c1c;
+  background: rgb(185 28 28 / 10%);
+  border-color: rgb(185 28 28 / 30%);
+}
+
+.review-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: var(--space-xs) 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.review-filter select {
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--space-xs);
+}
+
+.review-filter-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.dataset-card-review {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .originals-editor {
   display: flex;
   align-items: center;
@@ -1768,3 +1879,45 @@ input,
     animation: none !important;
   }
 }
+
+.toolbar-second-row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding-top: 10px; border-top: 1px solid #526273; }
+.toolbar-second-row .dataset-nav button { min-height: 40px; padding: 8px 18px; font-weight: 700; }
+.toolbar-second-row .review-picker { gap: 8px; padding: 8px 12px; border: 2px solid #718298; border-radius: 8px; background: #172433; }
+.toolbar-second-row .review-picker-label { color: #fff; font-size: 15px; font-weight: 700; }
+.toolbar .review-option { font-size: 15px; font-weight: 700; min-height: 40px; padding: 8px 18px; border: 2px solid #8392a2; border-radius: 6px; }
+.toolbar .review-option[aria-checked="true"] { outline: 2px solid white; outline-offset: 2px; color: #fff; }
+.toolbar .review-option.is-approved { background: #14532d; color: #dcfce7; }
+.toolbar .review-option.is-pending { background: #78350f; color: #fef3c7; }
+.toolbar .review-option.is-rejected { background: #7f1d1d; color: #fee2e2; }
+/* Keep the active opinion prominent while making the alternatives easy to scan past. */
+.toolbar .review-option:not([aria-checked="true"]) {
+  opacity: 0.66;
+  filter: saturate(0.78) brightness(0.9);
+  border-color: rgba(210, 222, 235, 0.65);
+}
+.toolbar .review-option:not([aria-checked="true"]).is-approved {
+  background: #14532d;
+  color: #dcfce7;
+}
+.toolbar .review-option:not([aria-checked="true"]).is-pending {
+  background: #78350f;
+  color: #fef3c7;
+}
+.toolbar .review-option:not([aria-checked="true"]).is-rejected {
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+.toolbar .review-option[aria-checked="true"] {
+  opacity: 1;
+  filter: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.autosave-indicator { color: #a7f3d0; font-size: 12px; }
+.review-navigation-options { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.review-choice { display: flex; align-items: center; gap: 6px; padding: 10px; border: 1px solid #94a3b8; border-radius: 6px; }
+.review-suppress { display: flex; align-items: center; gap: 8px; margin: 16px 0; }
+.review-navigation-dialog fieldset { border: 0; padding: 0; }
+
+.toolbar-top-row { flex-basis: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+.toolbar-top-row > * { flex-shrink: 0; }
+.toolbar-top-row .toolbar-file-names { margin-left: auto; width: auto; order: initial; }

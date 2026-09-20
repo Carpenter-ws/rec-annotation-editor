@@ -44,6 +44,36 @@ beforeEach(() => {
   vi.mocked(datasetApi.listDatasets).mockResolvedValue(datasets);
 });
 
+it("summarizes review states and opens the first one still pending", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        { stem: "a", image: "a.jpg", labels: "a.jsonl", review: "approved" },
+        { stem: "b", image: "b.jpg", labels: "b.jsonl", review: "rejected" },
+        { stem: "c", image: "c.jpg", labels: "c.jsonl" },
+      ],
+    },
+  ]);
+  const props = renderHome();
+
+  const card = await screen.findByTestId("dataset-card-dji");
+  expect(within(card).getByTestId("dataset-review-dji")).toHaveTextContent(
+    "审核：待审核 1 · 通过 1 · 打回 1",
+  );
+
+  await user.click(
+    within(card).getByRole("button", { name: "Open dataset dji" }),
+  );
+
+  expect(props.onOpenItem).toHaveBeenCalledWith(
+    "dji",
+    expect.objectContaining({ stem: "c" }),
+    expect.anything(),
+  );
+});
+
 it("lists every stored dataset with its counts and previews", async () => {
   renderHome();
 
@@ -56,8 +86,8 @@ it("lists every stored dataset with its counts and previews", async () => {
 
   const previews = [...card.querySelectorAll<HTMLImageElement>("img")];
   expect(previews.map((image) => image.getAttribute("src"))).toEqual([
-    "/datasets/dji/images/a.jpg",
-    "/datasets/dji/images/b.jpg",
+    "/thumbnails/dji/a.jpg",
+    "/thumbnails/dji/b.jpg",
   ]);
   expect(previews[0]).toHaveAttribute("loading", "lazy");
 

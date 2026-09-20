@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  REQUEST_TIMEOUT_MS,
   createDataset,
   datasetImageUrl,
   datasetLabelsUrl,
@@ -196,6 +197,24 @@ describe("dataset API calls", () => {
     mockFetch(() => Response.json({ error: "dataset name is taken" }, { status: 409 }));
 
     await expect(createDataset("dji")).rejects.toThrow("dataset name is taken");
+  });
+
+  it("gives up on a server that accepts the call but never answers", async () => {
+    vi.useFakeTimers();
+    mockFetch(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+
+    const call = listDatasets();
+    const assertion = expect(call).rejects.toThrow(/did not answer within/);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1);
+    await assertion;
+    vi.useRealTimers();
   });
 
   it("builds static asset URLs", () => {

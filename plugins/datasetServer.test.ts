@@ -18,6 +18,13 @@ describe("isValidSegment", () => {
     expect(isValidSegment("数据集 1")).toBe(true);
   });
 
+  it("accepts long generated names up to the file system limit", () => {
+    // Names this long come out of dataset importers; they must stay servable.
+    expect(isValidSegment(`${"a".repeat(198)}.jpg`)).toBe(true);
+    expect(isValidSegment("a".repeat(255))).toBe(true);
+    expect(isValidSegment("a".repeat(256))).toBe(false);
+  });
+
   it("rejects traversal and unsafe names", () => {
     expect(isValidSegment("..")).toBe(false);
     expect(isValidSegment("a/b")).toBe(false);
@@ -64,6 +71,45 @@ describe("dataset middleware", () => {
       server.close(() => resolve());
     });
     fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it("serves cached thumbnails, revalidates changes, and preserves originals", async () => {
+    await createDataset("thumb set");
+    const file = path.join(rootDir, "thumb set", "images", "large.svg");
+    const original = '<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1200"><rect width="2400" height="1200" fill="red"/></svg>';
+    fs.writeFileSync(file, original);
+    const url = `${baseUrl}/thumbnails/thumb%20set/large.svg`;
+    const response = await fetch(url);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/webp");
+    expect(response.headers.get("cache-control")).toContain("no-cache");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const { default: sharp } = await import("sharp");
+    expect(await sharp(bytes).metadata()).toMatchObject({ width: 480, height: 240 });
+    const etag = response.headers.get("etag")!;
+    const cached = await fetch(url, { headers: { "If-None-Match": etag } });
+    expect(cached.status).toBe(304);
+    expect(await cached.text()).toBe("");
+    const cacheDir = path.join(rootDir, "thumb set", ".thumbnails");
+    const cachedFile = path.join(cacheDir, fs.readdirSync(cacheDir)[0]!);
+    const cacheTime = fs.statSync(cachedFile).mtimeMs;
+    expect(Buffer.from(await (await fetch(url)).arrayBuffer())).toEqual(bytes);
+    expect(fs.statSync(cachedFile).mtimeMs).toBe(cacheTime);
+    expect(await (await fetch(`${baseUrl}/datasets/thumb%20set/images/large.svg`)).text()).toBe(original);
+    fs.writeFileSync(file, original.replace("red", "blue"));
+    const updated = await fetch(url, { headers: { "If-None-Match": etag } });
+    expect(updated.status).toBe(200);
+    expect(updated.headers.get("etag")).not.toBe(etag);
+    expect(Buffer.from(await updated.arrayBuffer())).not.toEqual(bytes);
+    fs.unlinkSync(file);
+    expect((await fetch(url)).status).toBe(404);
+  });
+
+  it("rejects unsafe thumbnail paths and corrupt images without serving originals", async () => {
+    await createDataset("dji");
+    fs.writeFileSync(path.join(rootDir, "dji", "images", "bad.jpg"), "broken");
+    expect((await fetch(`${baseUrl}/thumbnails/dji/bad.jpg`)).status).toBe(422);
+    expect((await fetch(`${baseUrl}/thumbnails/dji/a%2Fb.jpg`)).status).toBe(400);
   });
 
   const createDataset = async (name: string) =>
@@ -195,7 +241,13 @@ describe("dataset middleware", () => {
       {
         name: "dji",
         items: [
-          { stem: "a", image: "a.jpg", labels: "a.jsonl", originals: null },
+          {
+            stem: "a",
+            image: "a.jpg",
+            labels: "a.jsonl",
+            originals: null,
+            review: "pending",
+          },
         ],
       },
     ]);
@@ -220,12 +272,209 @@ describe("dataset middleware", () => {
         image: "a.jpg",
         labels: "a.jsonl",
         originals: "a.txt",
+        review: "pending",
       },
     ]);
 
     const original = await fetch(`${baseUrl}/datasets/dji/originals/a.txt`);
     expect(original.status).toBe(200);
     expect(await original.text()).toBe("1 2 3 4 boat\n");
+  });
+
+  it("turns files dropped into an existing dataset into items", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+    // Imported on the server side: the folders grow without the API noticing.
+    fs.writeFileSync(
+      path.join(rootDir, "dji", "images", "b.jpg"),
+      "fake-jpeg-bytes",
+    );
+    fs.writeFileSync(
+      path.join(rootDir, "dji", "labels", "b.jsonl"),
+      '{"expression": "imported", "targets": [[1, 2, 3, 4]]}',
+    );
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const [dataset] = (await response.json()) as {
+      items: { stem: string; image: string | null; labels: string | null }[];
+    }[];
+    expect(dataset?.items.map((item) => item.stem)).toEqual(["a", "b"]);
+    expect(dataset?.items[1]).toEqual({
+      stem: "b",
+      image: "b.jpg",
+      labels: "b.jsonl",
+      originals: null,
+      review: "pending",
+    });
+
+    // The new item is served like any other.
+    const image = await fetch(`${baseUrl}/datasets/dji/images/b.jpg`);
+    expect(image.status).toBe(200);
+    const labels = await fetch(`${baseUrl}/datasets/dji/labels/b.jsonl`);
+    expect(await labels.text()).toContain('"imported"');
+  });
+
+  it("discovers a dataset folder that was imported without a manifest", async () => {
+    const imported = path.join(rootDir, "dropped");
+    fs.mkdirSync(path.join(imported, "images"), { recursive: true });
+    fs.mkdirSync(path.join(imported, "labels"), { recursive: true });
+    fs.mkdirSync(path.join(imported, "originals"), { recursive: true });
+    fs.writeFileSync(path.join(imported, "images", "0017.jpg"), "fake-jpeg");
+    fs.writeFileSync(
+      path.join(imported, "labels", "0017.jsonl"),
+      '{"expression": "a person", "targets": [[1, 2, 3, 4]]}',
+    );
+    fs.writeFileSync(path.join(imported, "originals", "0017.txt"), "1 2 3 4 person\n");
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const datasets = (await response.json()) as {
+      name: string;
+      items: { stem: string; image: string | null; labels: string | null; originals?: string | null }[];
+    }[];
+    const dropped = datasets.find((entry) => entry.name === "dropped");
+    expect(dropped?.items).toEqual([
+      {
+        stem: "0017",
+        image: "0017.jpg",
+        labels: "0017.jsonl",
+        originals: "0017.txt",
+        review: "pending",
+      },
+    ]);
+
+    // It becomes a normal dataset: the manifest is written next to the files.
+    expect(fs.existsSync(path.join(imported, "dataset.json"))).toBe(true);
+    const saved = await fetch(`${baseUrl}/api/datasets/dropped/labels/0017.jsonl`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain" },
+      body: '{"expression": "edited", "targets": [[1, 2, 3, 4]]}',
+    });
+    expect(saved.status).toBe(204);
+  });
+
+  it("ignores a folder that holds no dataset at all", async () => {
+    fs.mkdirSync(path.join(rootDir, "notes"), { recursive: true });
+    fs.writeFileSync(path.join(rootDir, "notes", "todo.txt"), "nothing here");
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const datasets = (await response.json()) as { name: string }[];
+    expect(datasets.map((entry) => entry.name)).toEqual([]);
+  });
+
+  it("records review decisions in the dataset's own review file", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+
+    // Nothing decided yet: every image counts as pending.
+    const before = await fetch(`${baseUrl}/api/datasets`);
+    const [initial] = (await before.json()) as {
+      items: { stem: string; review?: string }[];
+    }[];
+    expect(initial?.items[0]?.review).toBe("pending");
+
+    const approved = await fetch(`${baseUrl}/api/datasets/dji/review/a`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "approved" }),
+    });
+    expect(approved.status).toBe(200);
+
+    const reviewFile = JSON.parse(
+      fs.readFileSync(path.join(rootDir, "dji", "review.json"), "utf8"),
+    ) as { version: number; items: Record<string, { status: string }> };
+    expect(reviewFile.version).toBe(1);
+    expect(reviewFile.items.a?.status).toBe("approved");
+
+    const after = await fetch(`${baseUrl}/api/datasets`);
+    const [decided] = (await after.json()) as {
+      items: { stem: string; review?: string }[];
+    }[];
+    expect(decided?.items[0]?.review).toBe("approved");
+
+    // Going back to pending drops the entry: the default is never stored.
+    const pending = await fetch(`${baseUrl}/api/datasets/dji/review/a`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "pending" }),
+    });
+    expect(pending.status).toBe(200);
+    const cleared = JSON.parse(
+      fs.readFileSync(path.join(rootDir, "dji", "review.json"), "utf8"),
+    ) as { items: Record<string, unknown> };
+    expect(cleared.items.a).toBeUndefined();
+  });
+
+  it("rejects a review status it does not know and an unknown item", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+
+    const invalid = await fetch(`${baseUrl}/api/datasets/dji/review/a`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "maybe" }),
+    });
+    expect(invalid.status).toBe(400);
+
+    const missing = await fetch(`${baseUrl}/api/datasets/dji/review/nope`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "approved" }),
+    });
+    expect(missing.status).toBe(404);
+    expect(fs.existsSync(path.join(rootDir, "dji", "review.json"))).toBe(false);
+  });
+
+  it("takes the review decision away with the item it belongs to", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+    await fetch(`${baseUrl}/api/datasets/dji/review/a`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "rejected" }),
+    });
+
+    const removed = await fetch(`${baseUrl}/api/datasets/dji/items/a`, {
+      method: "DELETE",
+    });
+    expect(removed.status).toBe(204);
+    const reviewFile = JSON.parse(
+      fs.readFileSync(path.join(rootDir, "dji", "review.json"), "utf8"),
+    ) as { items: Record<string, unknown> };
+    expect(reviewFile.items.a).toBeUndefined();
+  });
+
+  it("lets go of an item whose files all disappeared", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+    // The files were removed outside the editor: a re-import, a cleanup, or a
+    // dataset that was replaced on disk.
+    fs.rmSync(path.join(rootDir, "dji", "images", "a.jpg"));
+    fs.rmSync(path.join(rootDir, "dji", "labels", "a.jsonl"));
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const [dataset] = (await response.json()) as { items: unknown[] }[];
+    expect(dataset?.items).toEqual([]);
+
+    // The manifest is healed, not just filtered for this one response.
+    const stored = JSON.parse(
+      fs.readFileSync(path.join(rootDir, "dji", "dataset.json"), "utf8"),
+    ) as { items: unknown[] };
+    expect(stored.items).toEqual([]);
+  });
+
+  it("keeps an item that still has one of its files", async () => {
+    await createDataset("dji");
+    await uploadItem("dji");
+    // A label file on its own is a real item: its image can still arrive.
+    fs.rmSync(path.join(rootDir, "dji", "images", "a.jpg"));
+
+    const response = await fetch(`${baseUrl}/api/datasets`);
+    const [dataset] = (await response.json()) as {
+      items: { stem: string; image: string | null; labels: string | null }[];
+    }[];
+    expect(dataset?.items).toEqual([
+      { stem: "a", image: null, labels: "a.jsonl", originals: null, review: "pending" },
+    ]);
   });
 
   it("reads a manifest that was saved with a BOM", async () => {

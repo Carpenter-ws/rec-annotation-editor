@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { serveThumbnail } from "./thumbnails";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { Plugin } from "vite";
@@ -65,7 +66,9 @@ const CONTENT_TYPES: Record<string, string> = {
 export function isValidSegment(segment: string): boolean {
   return (
     segment.length > 0 &&
-    segment.length <= 180 &&
+    // 255 is the longest a single file system component can be. Imported data
+    // often carries long generated names, and those still have to be served.
+    segment.length <= 255 &&
     segment !== "." &&
     segment !== ".." &&
     !segment.includes("/") &&
@@ -102,6 +105,77 @@ export function readManifest(datasetDir: string, name: string): Manifest {
     // Missing or corrupt manifest: start from scratch.
   }
   return { name, items: [] };
+}
+
+/**
+ * Review states of one image. `pending` is the default, so it is never stored:
+ * `review.json` only holds the images that were actually moved on.
+ *
+ * It lives next to `dataset.json` as its own file: the manifest describes which
+ * files pair up, the review file records what humans decided about them, and
+ * keeping them apart means a review pass can be diffed, backed up, or produced
+ * by another tool without touching the annotation data.
+ */
+export const REVIEW_STATUSES = ["approved", "pending", "rejected"] as const;
+
+export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+
+export interface ReviewEntry {
+  status: ReviewStatus;
+  /** ISO timestamp of the last change, for auditing an iteration. */
+  updatedAt: string;
+}
+
+export interface ReviewFile {
+  /** Bumped when the shape below changes, so older files stay readable. */
+  version: number;
+  items: Record<string, ReviewEntry>;
+}
+
+const REVIEW_FILE = "review.json";
+
+export function readReview(datasetDir: string): ReviewFile {
+  try {
+    const raw = fs
+      .readFileSync(path.join(datasetDir, REVIEW_FILE), "utf8")
+      .replace(/^\uFEFF/, "");
+    const parsed = JSON.parse(raw) as ReviewFile;
+    if (parsed && typeof parsed === "object" && parsed.items) {
+      return { version: parsed.version ?? 1, items: parsed.items };
+    }
+  } catch {
+    // Missing or corrupt: every image simply counts as pending.
+  }
+  return { version: 1, items: {} };
+}
+
+export function writeReview(datasetDir: string, review: ReviewFile): void {
+  fs.writeFileSync(
+    path.join(datasetDir, REVIEW_FILE),
+    `${JSON.stringify(review, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+/** Status of one image; anything never reviewed is still pending. */
+export function reviewStatusOf(review: ReviewFile, stem: string): ReviewStatus {
+  const entry = review.items[stem];
+  if (!entry) return "pending";
+  return REVIEW_STATUSES.some((status) => status === entry.status)
+    ? entry.status
+    : "pending";
+}
+
+/** Tags every item with its review status, for the editor to show. */
+export function withReview(datasetDir: string, manifest: Manifest): Manifest {
+  const review = readReview(datasetDir);
+  return {
+    ...manifest,
+    items: manifest.items.map((item) => ({
+      ...item,
+      review: reviewStatusOf(review, item.stem),
+    })),
+  };
 }
 
 export function writeManifest(datasetDir: string, manifest: Manifest): void {
@@ -191,13 +265,54 @@ function filesByStem(
       if (!FOLDER_EXTENSIONS[folder].has(path.extname(name).toLowerCase())) {
         continue;
       }
-      const stem = stemOf(name);
+      // Stems are compared case-insensitively so a file that differs only in
+      // case still pairs with the item that owns it.
+      const stem = stemOf(name).toLocaleLowerCase();
       if (!byStem.has(stem)) byStem.set(stem, name);
     }
   } catch {
     // Missing folder: nothing is stored under it yet.
   }
   return byStem;
+}
+
+/** The files one item owns, gathered by the stem they share. */
+interface StemFiles {
+  stem: string;
+  image: string | null;
+  labels: string | null;
+  originals: string | null;
+}
+
+/** Groups every stored file of a dataset by the stem it belongs to. */
+function filesByItemStem(
+  listings: Record<DatasetFolder, Map<string, string>>,
+): Map<string, StemFiles> {
+  const byStem = new Map<string, StemFiles>();
+  for (const folder of DATASET_FOLDERS) {
+    const key = ITEM_KEYS[folder];
+    for (const [stemKey, fileName] of listings[folder]) {
+      const entry: StemFiles = byStem.get(stemKey) ?? {
+        stem: stemOf(fileName),
+        image: null,
+        labels: null,
+        originals: null,
+      };
+      entry[key] = fileName;
+      // An image names the item; without one its labels do.
+      if (folder === "images") entry.stem = stemOf(fileName);
+      byStem.set(stemKey, entry);
+    }
+  }
+  return byStem;
+}
+
+/** A folder is a dataset when it holds a manifest or any of its roles. */
+export function isDatasetDir(datasetDir: string): boolean {
+  if (fs.existsSync(path.join(datasetDir, "dataset.json"))) return true;
+  return DATASET_FOLDERS.some((folder) =>
+    fs.existsSync(path.join(datasetDir, folder)),
+  );
 }
 
 /**
@@ -217,8 +332,12 @@ export function reconcileManifest(
     originals: filesByStem(datasetDir, "originals"),
   };
 
+  const known = new Set(
+    manifest.items.map((item) => item.stem.toLocaleLowerCase()),
+  );
   let changed = false;
   const items = manifest.items.map((item) => {
+    const stemKey = item.stem.toLocaleLowerCase();
     const next: ManifestItem = { ...item };
     for (const folder of DATASET_FOLDERS) {
       const key = ITEM_KEYS[folder];
@@ -228,7 +347,7 @@ export function reconcileManifest(
       const stored =
         recordedPath !== null && fs.existsSync(recordedPath)
           ? recorded
-          : (listings[folder].get(item.stem) ?? null);
+          : (listings[folder].get(stemKey) ?? null);
       // Older manifests lack a field entirely; writing the canonical shape back
       // keeps the stored file and the served one in sync.
       if (stored !== recorded || !(key in next)) changed = true;
@@ -237,7 +356,31 @@ export function reconcileManifest(
     return next;
   });
 
-  const reconciled: Manifest = { ...manifest, items };
+  // Files that no item owns yet — dropped into the folders by an import script
+  // or by hand — become items of their own, so the dataset shows everything it
+  // actually holds.
+  for (const [stemKey, entry] of filesByItemStem(listings)) {
+    if (known.has(stemKey)) continue;
+    known.add(stemKey);
+    changed = true;
+    items.push({
+      stem: entry.stem,
+      image: entry.image,
+      labels: entry.labels,
+      originals: entry.originals,
+    });
+  }
+
+  // An item whose files are all gone is a leftover of a re-import or a cleanup:
+  // the manifest lets it go, so the dataset only shows what it can serve. The
+  // files are the source of truth here, nothing but bookkeeping is dropped.
+  const kept = items.filter(
+    (item) =>
+      item.image !== null || item.labels !== null || item.originals !== null,
+  );
+  if (kept.length !== items.length) changed = true;
+
+  const reconciled: Manifest = { ...manifest, items: kept };
   if (changed) writeManifest(datasetDir, reconciled);
   return reconciled;
 }
@@ -264,6 +407,26 @@ export function createDatasetMiddleware(rootDir: string) {
       return;
     }
     const method = (req.method ?? "GET").toUpperCase();
+
+    if (method === "GET" && url.startsWith("/thumbnails/")) {
+      const segments = url.slice("/thumbnails/".length).split("/");
+      const [name, fileName] = segments;
+      if (segments.length !== 2 || !name || !fileName ||
+          !isValidSegment(name) || !isValidSegment(fileName)) {
+        sendError(res, 400, "invalid thumbnail path");
+        return;
+      }
+      const source = resolveWithin(rootDir, name, "images", fileName);
+      if (!source || !IMAGE_EXTENSIONS.has(path.extname(fileName).toLowerCase())) {
+        sendError(res, 404, "image not found");
+        return;
+      }
+      void serveThumbnail(req, res, source).catch(() => {
+        if (!res.headersSent) sendError(res, 500, "thumbnail server error");
+        else res.destroy();
+      });
+      return;
+    }
 
     // Serve stored dataset assets.
     if (method === "GET" && url.startsWith("/datasets/")) {
@@ -300,12 +463,15 @@ export function createDatasetMiddleware(rootDir: string) {
         const entries = fs
           .readdirSync(rootDir, { withFileTypes: true })
           .filter((entry) => entry.isDirectory())
-          .filter((entry) =>
-            fs.existsSync(path.join(rootDir, entry.name, "dataset.json")),
-          )
+          // A folder that was imported on the server side has no manifest yet;
+          // it still counts as a dataset so the editor can show it.
+          .filter((entry) => isDatasetDir(path.join(rootDir, entry.name)))
           .map((entry) => {
             const datasetDir = path.join(rootDir, entry.name);
-            return loadManifest(datasetDir, entry.name);
+            return withReview(
+              datasetDir,
+              loadManifest(datasetDir, entry.name),
+            );
           });
         sendJson(res, 200, entries);
         return;
@@ -335,7 +501,7 @@ export function createDatasetMiddleware(rootDir: string) {
       }
 
       const match = url.match(
-        /^\/api\/datasets\/([^/]+)(?:\/(items|labels)(?:\/([^/]+))?)?$/,
+        /^\/api\/datasets\/([^/]+)(?:\/(items|labels|review)(?:\/([^/]+))?)?$/,
       );
       if (!match) {
         next();
@@ -444,8 +610,42 @@ export function createDatasetMiddleware(rootDir: string) {
           (entry) => entry.stem !== resourceKey,
         );
         writeManifest(datasetDir, manifest);
+        // The review decision goes with the image it belongs to.
+        const review = readReview(datasetDir);
+        if (review.items[resourceKey] !== undefined) {
+          delete review.items[resourceKey];
+          writeReview(datasetDir, review);
+        }
         res.writeHead(204);
         res.end();
+        return;
+      }
+
+      if (resource === "review" && resourceKey && method === "PUT") {
+        const body = JSON.parse((await readBody(req)) || "{}") as {
+          status?: string;
+        };
+        const status = body.status;
+        if (!REVIEW_STATUSES.some((known) => known === status)) {
+          sendError(res, 400, "invalid review status");
+          return;
+        }
+        if (!manifest.items.some((entry) => entry.stem === resourceKey)) {
+          sendError(res, 404, "item not found in dataset");
+          return;
+        }
+        const review = readReview(datasetDir);
+        if (status === "pending") {
+          // The default is not stored, so the file only lists real decisions.
+          delete review.items[resourceKey];
+        } else {
+          review.items[resourceKey] = {
+            status: status as ReviewStatus,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        writeReview(datasetDir, review);
+        sendJson(res, 200, { stem: resourceKey, status });
         return;
       }
 

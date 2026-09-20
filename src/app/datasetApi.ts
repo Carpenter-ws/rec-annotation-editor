@@ -1,4 +1,5 @@
 import { isJsonlLabelFile } from "../domain/jsonl";
+import type { ReviewStatus } from "../domain/review";
 
 export interface DatasetItem {
   /** Basename without extension; pairs one image with one label file. */
@@ -12,6 +13,8 @@ export interface DatasetItem {
    * originals/ folder. They load as the picking pool when the item opens.
    */
   originals?: string | null;
+  /** Review state of the image; `pending` unless someone decided otherwise. */
+  review?: ReviewStatus;
 }
 
 export interface DatasetSummary {
@@ -94,8 +97,27 @@ export function planDatasetUpload(files: readonly File[]): DatasetUploadPlan {
   return { items: [...items.values()], unsupported };
 }
 
+/**
+ * How long one API call may take before it is given up on. A dev server that
+ * hangs instead of refusing would otherwise leave a caller waiting forever,
+ * and a review decision would look saved while never reaching the disk.
+ */
+export const REQUEST_TIMEOUT_MS = 20_000;
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`the server did not answer within ${REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
@@ -226,8 +248,28 @@ export async function saveDatasetLabels(
   );
 }
 
+export function datasetThumbnailUrl(name: string, fileName: string): string {
+  return `/thumbnails/${encodeURIComponent(name)}/${encodeURIComponent(fileName)}`;
+}
+
 export function datasetImageUrl(name: string, fileName: string): string {
   return `/datasets/${encodeURIComponent(name)}/images/${encodeURIComponent(fileName)}`;
+}
+
+/** Records the review state of one image in the dataset's review file. */
+export async function saveDatasetReview(
+  name: string,
+  stem: string,
+  status: ReviewStatus,
+): Promise<void> {
+  await request<void>(
+    `/api/datasets/${encodeURIComponent(name)}/review/${encodeURIComponent(stem)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    },
+  );
 }
 
 export function datasetLabelsUrl(name: string, fileName: string): string {

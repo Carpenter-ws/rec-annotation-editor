@@ -27,6 +27,7 @@ vi.mock("./app/datasetApi", async (importOriginal) => {
     deleteDatasetItem: vi.fn(),
     uploadDatasetItems: vi.fn(),
     saveDatasetLabels: vi.fn(),
+    saveDatasetReview: vi.fn(),
   };
 });
 
@@ -206,6 +207,7 @@ function mockImageEnvironment(outcomes: readonly (DecodedImage | "error")[]) {
     onerror: null | (() => void) = null;
 
     set src(_value: string) {
+      if (!_value) return; // Cancelling an image does not decode another file.
       const outcome = outcomes[outcomeNumber++];
       queueMicrotask(() => {
         if (!outcome || outcome === "error") {
@@ -354,6 +356,7 @@ function mockDownloadEnvironment() {
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -1486,7 +1489,7 @@ it("gives each dropped file its role and reports the rest as rejected", async ()
   // The second label file becomes the picking pool instead of being rejected,
   // which the toolbar reports by enabling its originals switches.
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Hide originals" })).toBeEnabled(),
+    expect(screen.getByRole("button", { name: "Show originals" })).toBeEnabled(),
   );
   expect(screen.getByTestId("editor-notice")).toHaveTextContent(
     'Loaded 1 original annotation from "extra.TXT"',
@@ -1518,6 +1521,7 @@ it("leaves the originals alone outside the add and edit modes", async () => {
     textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
   );
 
+  await user.click(await screen.findByRole("button", { name: "Show originals" }));
   expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
   // Nothing is being added, so the layer takes no pointer events at all.
   expect(screen.getByTestId("reference-layer")).toHaveAttribute(
@@ -1560,6 +1564,7 @@ it("joins the armed expression when an original is clicked while adding", async 
     screen.getByLabelText("Open original annotations"),
     textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
   );
+  await user.click(await screen.findByRole("button", { name: "Show originals" }));
   expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
 
   // Arming a category is what makes the originals clickable.
@@ -1629,6 +1634,7 @@ it("asks for the expression when an original is clicked in plain add mode", asyn
     screen.getByLabelText("Open original annotations"),
     textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
   );
+  await user.click(await screen.findByRole("button", { name: "Show originals" }));
   expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
 
   await user.click(screen.getByRole("button", { name: "Add box" }));
@@ -1667,6 +1673,7 @@ it("keeps the originals read-only until their editing mode is unlocked", async (
     screen.getByLabelText("Open original annotations"),
     textFile("20 20 60 60 boat\n100 100 200 200 boat", "DJI_0133.txt"),
   );
+  await user.click(await screen.findByRole("button", { name: "Show originals" }));
   await screen.findByTestId("ref-ref_001");
   const canvas = screen.getByLabelText("Annotation canvas");
   Object.assign(canvas, {
@@ -1718,7 +1725,7 @@ it("keeps the originals read-only until their editing mode is unlocked", async (
   expect(screen.getByTestId("ref-ref_002")).toBeVisible();
 });
 
-it("hides the originals from the toolbar and shows them again", async () => {
+it("loads originals hidden by default and shows them on request", async () => {
   const user = userEvent.setup();
   mockImageEnvironment([{ width: 400, height: 300 }]);
   mockViewportEnvironment();
@@ -1732,9 +1739,7 @@ it("hides the originals from the toolbar and shows them again", async () => {
     screen.getByLabelText("Open original annotations"),
     textFile("20 20 60 60 boat", "DJI_0133.txt"),
   );
-  await screen.findByTestId("ref-ref_001");
-
-  await user.click(screen.getByRole("button", { name: "Hide originals" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Show originals" })).toBeEnabled());
 
   // The layer is gone, the pool is not: the toolbar keeps the toggle.
   expect(screen.queryByTestId("reference-layer")).not.toBeInTheDocument();
@@ -1766,8 +1771,7 @@ it("brings hidden originals back as soon as a box is being added", async () => {
     screen.getByLabelText("Open original annotations"),
     textFile("20 20 60 60 boat", "DJI_0133.txt"),
   );
-  await screen.findByTestId("ref-ref_001");
-  await user.click(screen.getByRole("button", { name: "Hide originals" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Show originals" })).toBeEnabled());
   expect(screen.queryByTestId("ref-ref_001")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "Add box" }));
@@ -1790,16 +1794,16 @@ it("keeps both originals toggles disabled until a file is loaded", async () => {
     new File(["pixels"], "scene.png", { type: "image/png" }),
   );
 
-  expect(screen.getByRole("button", { name: "Hide originals" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Show originals" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Edit originals" })).toBeDisabled();
 
   await user.upload(
     screen.getByLabelText("Open original annotations"),
     textFile("20 20 60 60 boat", "DJI_0133.txt"),
   );
-  await screen.findByTestId("ref-ref_001");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Show originals" })).toBeEnabled());
 
-  expect(screen.getByRole("button", { name: "Hide originals" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Show originals" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Edit originals" })).toBeEnabled();
 });
 
@@ -2894,8 +2898,8 @@ it("commits a focused expression transaction before shortcut Save", async () => 
   expect(
     reducer.mock.calls
       .map(([, action]) => action.type)
-      .filter((type) => ["RENAME_LABEL", "MARK_SAVED"].includes(type)),
-  ).toEqual(["RENAME_LABEL", "MARK_SAVED"]);
+      .filter((type) => ["RENAME_LABEL", "MARK_SAVED_SNAPSHOT"].includes(type)),
+  ).toEqual(["RENAME_LABEL", "MARK_SAVED_SNAPSHOT"]);
 });
 
 it("commits a focused numeric draft before shortcut Save", async () => {
@@ -2931,8 +2935,8 @@ it("commits a focused numeric draft before shortcut Save", async () => {
   expect(
     reducer.mock.calls
       .map(([, action]) => action.type)
-      .filter((type) => ["UPDATE_ANNOTATION", "MARK_SAVED"].includes(type)),
-  ).toEqual(["UPDATE_ANNOTATION", "MARK_SAVED"]);
+      .filter((type) => ["UPDATE_ANNOTATION", "MARK_SAVED_SNAPSHOT"].includes(type)),
+  ).toEqual(["UPDATE_ANNOTATION", "MARK_SAVED_SNAPSHOT"]);
 });
 
 it("exposes disabled-aware Undo and Redo toolbar controls", async () => {
@@ -4362,7 +4366,8 @@ it("opens a dataset item with its original annotations ready to pick", async () 
   );
 
   // The pool arrives with the item, before anything is added.
-  expect(await screen.findByTestId("ref-ref_001")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Show originals" })).toBeEnabled());
+  expect(screen.queryByTestId("reference-layer")).not.toBeInTheDocument();
   expect(screen.getByTestId("editor-notice")).toHaveTextContent("DJI_0001.txt");
   expect(screen.getByRole("status")).toHaveTextContent("1 annotation");
 
@@ -4381,6 +4386,301 @@ it("opens a dataset item with its original annotations ready to pick", async () 
     expect(screen.getByRole("status")).toHaveTextContent("2 annotations"),
   );
   expect(screen.getByTestId("ref-ref_001")).toBeVisible();
+});
+
+it("records the review decision of the image being annotated", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("10 20 110 120 person 0\n", { status: 200 })),
+  );
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [{ stem: "a", image: "a.jpg", labels: "a.txt", review: "pending" }],
+    },
+  ]);
+  mockedApi.saveDatasetReview.mockResolvedValue(undefined);
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+
+  const group = await screen.findByRole("radiogroup", { name: "审核意见" });
+  expect(within(group).getByText("审核意见：")).toBeVisible();
+  const approved = within(group).getByRole("radio", { name: "审核通过" });
+  expect(within(group).getByRole("radio", { name: "待审核" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(approved).toHaveAttribute("aria-checked", "false");
+
+  // Exactly one state stays selected, and the decision is written down.
+  await user.click(approved);
+
+  expect(approved).toHaveAttribute("aria-checked", "true");
+  expect(within(group).getByRole("radio", { name: "待审核" })).toHaveAttribute(
+    "aria-checked",
+    "false",
+  );
+  await waitFor(() =>
+    expect(datasetApi.saveDatasetReview).toHaveBeenCalledWith(
+      "dji",
+      "a",
+      "approved",
+    ),
+  );
+});
+
+it("opens a dataset on the first image still waiting for review", async () => {
+  const user = userEvent.setup();
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("10 20 110 120 person 0\n", { status: 200 })),
+  );
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        {
+          stem: "reviewed",
+          image: "reviewed.jpg",
+          labels: "reviewed.txt",
+          review: "approved",
+        },
+        { stem: "todo", image: "todo.jpg", labels: "todo.txt" },
+      ],
+    },
+  ]);
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+
+  // The second image is the first one nobody has looked at yet.
+  expect(await screen.findByLabelText("Open files")).toHaveTextContent(
+    "todo.jpg",
+  );
+  const group = screen.getByRole("radiogroup", { name: "审核意见" });
+  expect(within(group).getByRole("radio", { name: "待审核" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+});
+
+it("moves on to the next image waiting for review after a decision", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  // Current image, its reviewed neighbor, then the automatic advance target.
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("10 20 110 120 person 0\n", { status: 200 })),
+  );
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        { stem: "first", image: "first.jpg", labels: "first.txt" },
+        {
+          stem: "reviewed",
+          image: "reviewed.jpg",
+          labels: "reviewed.txt",
+          review: "approved",
+        },
+        { stem: "last", image: "last.jpg", labels: "last.txt" },
+      ],
+    },
+  ]);
+  mockedApi.saveDatasetReview.mockResolvedValue(undefined);
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  expect(await screen.findByLabelText("Open files")).toHaveTextContent(
+    "first.jpg",
+  );
+
+  await user.click(screen.getByRole("radio", { name: "审核通过" }));
+
+  // The image just decided is left behind, the reviewed one is skipped, and the
+  // editor lands on the next image that still needs a look.
+  await waitFor(() =>
+    expect(screen.getByLabelText("Open files")).toHaveTextContent("last.jpg"),
+  );
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("3 / 3");
+  expect(
+    within(screen.getByRole("radiogroup", { name: "审核意见" })).getByRole(
+      "radio",
+      { name: "待审核" },
+    ),
+  ).toHaveAttribute("aria-checked", "true");
+  expect(datasetApi.saveDatasetReview).toHaveBeenCalledWith(
+    "dji",
+    "first",
+    "approved",
+  );
+
+  // "待审核" is not a decision: the editor stays where it is.
+  await user.click(screen.getByRole("radio", { name: "打回" }));
+
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("3 / 3");
+  await waitFor(() =>
+    expect(datasetApi.saveDatasetReview).toHaveBeenCalledWith(
+      "dji",
+      "last",
+      "rejected",
+    ),
+  );
+  // Nothing is left after it, so the editor stays and says so.
+  expect(await screen.findByTestId("add-toast")).toHaveTextContent(
+    "No other image is waiting for review.",
+  );
+});
+
+it("retries a review decision the server missed the first time", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([{ width: 400, height: 300 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("10 20 110 120 person 0\n", { status: 200 })),
+  );
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        { stem: "a", image: "a.jpg", labels: "a.txt", review: "pending" },
+      ],
+    },
+  ]);
+  // A dev server restarting under the page fails for a moment.
+  mockedApi.saveDatasetReview
+    .mockRejectedValueOnce(new Error("Failed to fetch"))
+    .mockResolvedValue(undefined);
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  await user.click(
+    within(await screen.findByRole("radiogroup", { name: "审核意见" })).getByRole(
+      "radio",
+      { name: "审核通过" },
+    ),
+  );
+
+  await waitFor(
+    () => expect(datasetApi.saveDatasetReview).toHaveBeenCalledTimes(2),
+    { timeout: 5000 },
+  );
+  expect(screen.getByTestId("editor-notice")).not.toHaveTextContent(
+    /Could not save/,
+  );
+});
+
+it("rolls a review decision back and says so when saving keeps failing", async () => {
+  const user = userEvent.setup();
+  const mockedApi = vi.mocked(datasetApi);
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  mockViewportEnvironment();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("10 20 110 120 person 0\n", { status: 200 })),
+  );
+  mockedApi.listDatasets.mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        { stem: "a", image: "a.jpg", labels: "a.txt", review: "pending" },
+        { stem: "b", image: "b.jpg", labels: "b.txt", review: "approved" },
+      ],
+    },
+  ]);
+  mockedApi.saveDatasetReview.mockRejectedValue(new Error("Failed to fetch"));
+  // Every open re-loads its image: a, b, and a again at the end.
+  mockImageEnvironment([
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+    { width: 400, height: 300 },
+  ]);
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  await user.click(
+    within(await screen.findByRole("radiogroup", { name: "审核意见" })).getByRole(
+      "radio",
+      { name: "审核通过" },
+    ),
+  );
+
+  // It gives up after the retries — and the editor has moved on to "b" by then,
+  // which is exactly when the failure used to be swallowed.
+  await waitFor(
+    () => expect(datasetApi.saveDatasetReview).toHaveBeenCalledTimes(3),
+    { timeout: 8000 },
+  );
+  expect(await screen.findByTestId("editor-notice")).toHaveTextContent(
+    'Could not save the review status for "a"',
+  );
+  expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 2");
+
+  // The image that failed is still pending, not silently "approved".
+  await user.click(screen.getByRole("button", { name: "Previous image" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("dataset-position")).toHaveTextContent("1 / 2"),
+  );
+  expect(
+    within(screen.getByRole("radiogroup", { name: "审核意见" })).getByRole(
+      "radio",
+      { name: "待审核" },
+    ),
+  ).toHaveAttribute("aria-checked", "true");
+});
+
+it("shows and filters review states in the file manager", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([
+    {
+      name: "dji",
+      items: [
+        { stem: "a", image: "a.jpg", labels: "a.txt", review: "approved" },
+        { stem: "b", image: "b.jpg", labels: "b.txt" },
+        { stem: "c", image: "c.jpg", labels: "c.txt", review: "rejected" },
+      ],
+    },
+  ]);
+  render(<App />);
+
+  await user.click(
+    await screen.findByRole("button", { name: "Manage files" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Datasets" });
+  expect(within(dialog).getByTestId("review-chip-a")).toHaveTextContent(
+    "审核通过",
+  );
+  expect(within(dialog).getByTestId("review-chip-b")).toHaveTextContent(
+    "待审核",
+  );
+  expect(within(dialog).getByTestId("review-chip-c")).toHaveTextContent("打回");
+
+  await user.selectOptions(
+    within(dialog).getByLabelText("Filter dji by review status"),
+    "pending",
+  );
+
+  expect(within(dialog).getByTestId("review-chip-b")).toBeVisible();
+  expect(within(dialog).queryByTestId("review-chip-a")).not.toBeInTheDocument();
+  expect(within(dialog).queryByTestId("review-chip-c")).not.toBeInTheDocument();
 });
 
 it("scales normalized JSONL dataset targets to image pixels and back", async () => {
@@ -4470,7 +4770,7 @@ function mockDatasetNavigation(
   items: datasetApi.DatasetItem[],
   labelsByFile: Record<string, string>,
 ) {
-  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items }]);
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: items.map(item => ({ ...item, review: item.review ?? "approved" })) }]);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -4613,46 +4913,19 @@ it("hides dataset navigation when no dataset item is open", async () => {
   ).not.toBeInTheDocument();
 });
 
-it("asks before discarding unsaved edits when switching dataset items", async () => {
+it("saves edits instead of asking to discard them when switching dataset items", async () => {
   const user = userEvent.setup();
-  mockImageEnvironment([
-    { width: 400, height: 300 },
-    { width: 400, height: 300 },
-  ]);
+  mockImageEnvironment(Array.from({length: 8}, () => ({width: 400, height: 300})));
   mockViewportEnvironment();
   mockDatasetNavigation(threeDatasetItems, threeLabelFiles);
+  vi.mocked(datasetApi.saveDatasetLabels).mockResolvedValue(undefined);
   await renderApp();
-
   await openDatasetStem(user, "a");
   await renameCategory(user, "alpha", "changed");
-  expect(screen.getByLabelText("Save status")).toHaveTextContent(
-    "Unsaved changes",
-  );
-
   await user.click(screen.getByRole("button", { name: "Next image" }));
-
-  const confirm = await screen.findByRole("dialog", {
-    name: "Discard unsaved changes?",
-  });
-  expect(confirm).toBeVisible();
-  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
-
-  await user.click(screen.getByRole("button", { name: "Keep editing" }));
-  expect(
-    screen.queryByRole("dialog", { name: "Discard unsaved changes?" }),
-  ).not.toBeInTheDocument();
-  expect(openCards("changed").length).toBeGreaterThan(0);
-
-  await user.click(screen.getByRole("button", { name: "Next image" }));
-  await revealCardsAfter(user, async () => {
-    await user.click(
-      await screen.findByRole("button", { name: "Discard and switch" }),
-    );
-  });
-
-  await waitFor(() => expect(openCards("beta").length).toBeGreaterThan(0));
-  expect(screen.getByTestId("dataset-position")).toHaveTextContent("2 / 3");
-  expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved");
+  await waitFor(() => expect(screen.getByLabelText("Open files")).toHaveTextContent("b.jpg"));
+  expect(datasetApi.saveDatasetLabels).toHaveBeenCalledWith("dji", "a.jsonl", expect.stringContaining("changed"));
+  expect(screen.queryByRole("dialog", { name: "Discard unsaved changes?" })).not.toBeInTheDocument();
 });
 
 it("moves between dataset items with Alt+Arrow keys", async () => {
@@ -5274,4 +5547,260 @@ it("leaves Add Box mode once when Escape is pressed before a draft exists", asyn
   expect(
     reducer.mock.calls.filter(([, action]) => action.type === "SET_MODE"),
   ).toEqual([[expect.anything(), { type: "SET_MODE", mode: "select" }]]);
+});
+
+it("keeps originals off the home page and enters the canvas before the image finishes", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: [
+    { stem: "a", image: "a.jpg", labels: null },
+    { stem: "b", image: "b.jpg", labels: null },
+    { stem: "c", image: "c.jpg", labels: null },
+  ] }]);
+  const { images } = mockDeferredImageEnvironment();
+  mockViewportEnvironment();
+  render(<App />);
+  const card = await screen.findByRole("button", { name: "Open dataset dji" });
+  expect(images).toHaveLength(0);
+  expect([...document.querySelectorAll("img")].every(image => image.src.includes("/thumbnails/"))).toBe(true);
+  await user.click(card);
+  expect(window.location.pathname).toBe("/editor");
+  expect(screen.getByText(/Loading image/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Open dataset dji" })).not.toBeInTheDocument();
+  expect(images).toHaveLength(1);
+  await settleDeferred(() => images[0]!.succeed(1000, 800));
+  expect(screen.queryByText(/Loading image/)).not.toBeInTheDocument();
+  expect(images).toHaveLength(3);
+  await act(async () => { window.history.back(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(await screen.findByRole("button", { name: "Open dataset dji" })).toBeVisible();
+  expect(window.location.pathname).toBe("/");
+  await act(async () => { window.history.forward(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(window.location.pathname).toBe("/editor");
+  expect(screen.getByText(/Loading image/)).toBeVisible();
+});
+
+it("restores the selected dataset image when its canvas URL is opened directly", async () => {
+  window.history.replaceState(null, "", "/editor?dataset=dji&image=b");
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: [
+    { stem: "a", image: "a.jpg", labels: null }, { stem: "b", image: "b.jpg", labels: null },
+  ] }]);
+  const { images } = mockDeferredImageEnvironment();
+  mockViewportEnvironment();
+  render(<App />);
+  await waitFor(() => expect(images).toHaveLength(1));
+  expect(screen.getByText(/Loading image/)).toBeVisible();
+  await settleDeferred(() => images[0]!.succeed(1000, 800));
+  expect(screen.getByLabelText("Image workspace").querySelector("image")).toHaveAttribute("href", "/datasets/dji/images/b.jpg");
+});
+
+it("cancels a pending canvas load when returning home and ignores late completion", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: [
+    { stem: "a", image: "a.jpg", labels: null },
+  ] }]);
+  const { images } = mockDeferredImageEnvironment();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  await user.click(screen.getByRole("button", { name: "Back to datasets" }));
+  await settleDeferred(() => images[0]!.succeed(1000, 800));
+  expect(await screen.findByRole("button", { name: "Open dataset dji" })).toBeVisible();
+  expect(window.location.pathname).toBe("/");
+  expect(screen.queryByText(/Loading image/)).not.toBeInTheDocument();
+});
+
+it("keeps unsaved edits when browser Back is cancelled, then leaves on confirmation", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: [
+    { stem: "a", image: "a.jpg", labels: "a.txt" },
+  ] }]);
+  mockImageEnvironment([{ width: 1000, height: 800 }]);
+  mockViewportEnvironment();
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("10 20 110 120 person 0")));
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  await screen.findByText("person", { exact: true });
+  await renameCategory(user, "person", "edited");
+  await act(async () => { window.history.back(); await new Promise(resolve => setTimeout(resolve, 50)); });
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(window.location.pathname).toBe("/editor");
+  expect(screen.getByText("edited", { exact: true })).toBeVisible();
+  confirm.mockReturnValue(true);
+  await act(async () => { window.history.back(); await new Promise(resolve => setTimeout(resolve, 50)); });
+  expect(await screen.findByRole("button", { name: "Open dataset dji" })).toBeVisible();
+  expect(window.location.pathname).toBe("/");
+});
+
+it("clears a native writable label handle when leaving for a new editor page", async () => {
+  const user = userEvent.setup();
+  const { click } = mockDownloadEnvironment();
+  const handle = {
+    getFile: vi.fn().mockResolvedValue(textFile("0 0 10 10 picked label 0", "picked.txt")),
+    createWritable: vi.fn().mockResolvedValue({ write: vi.fn(), close: vi.fn() }),
+  };
+  vi.stubGlobal("showOpenFilePicker", vi.fn().mockResolvedValue([handle]));
+  await renderApp();
+  await user.click(screen.getByRole("button", { name: "Open labels" }));
+  await screen.findByText("picked label");
+  await user.click(screen.getByRole("button", { name: "Home" }));
+  await user.click(await screen.findByRole("button", { name: "Open files without a dataset" }));
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  expect(handle.createWritable).not.toHaveBeenCalled();
+  expect(click).toHaveBeenCalledOnce();
+});
+
+it("restores the previous canvas URL if opening the next image fails", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: [
+    { stem: "a", image: "a.jpg", labels: null, review: "approved" }, { stem: "b", image: "b.jpg", labels: null, review: "approved" },
+  ] }]);
+  mockImageEnvironment([{ width: 1000, height: 800 }, "error", "error"]);
+  mockViewportEnvironment();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  await screen.findByLabelText("Open files");
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+  await screen.findByRole("dialog", { name: "Could not open dataset item" });
+  expect(new URLSearchParams(window.location.search).get("image")).toBe("a");
+});
+
+it("replaces the dataset URL when local files detach the canvas from a dataset", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: [
+    { stem: "a", image: "a.jpg", labels: null },
+  ] }]);
+  mockImageEnvironment([{ width: 1000, height: 800 }]);
+  mockViewportEnvironment();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  await screen.findByLabelText("Open files");
+  await user.upload(screen.getByLabelText("Open labels"), textFile("0 0 10 10 local 0", "local.txt"));
+  await screen.findByText("local", { exact: true });
+  expect(window.location.pathname + window.location.search).toBe("/editor");
+});
+
+it("keeps the previous canvas mounted but inert while the next image loads", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "dji", items: [
+    { stem: "a", image: "a.jpg", labels: null, review: "approved" }, { stem: "b", image: "b.jpg", labels: null, review: "approved" },
+  ] }]);
+  const { images } = mockDeferredImageEnvironment();
+  mockViewportEnvironment();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Open dataset dji" }));
+  await settleDeferred(() => images[0]!.succeed(1000, 800));
+  const canvas = screen.getByLabelText("Image workspace").querySelector("image");
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+  expect(screen.getByLabelText("Image workspace").querySelector("image")).toBe(canvas);
+  expect(canvas?.closest("[inert]")).not.toBeNull();
+  await settleDeferred(() => images[1]!.succeed(1000, 800));
+  await waitFor(() => expect(canvas?.closest("[inert]")).toBeNull());
+});
+
+async function openAutosaveFixture(user: ReturnType<typeof userEvent.setup>, review: "pending" | "approved" = "approved") {
+  mockImageEnvironment(Array.from({ length: 12 }, () => ({ width: 1000, height: 800 })));
+  mockViewportEnvironment();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "autosave", items: [
+    { stem: "a", image: "a.jpg", labels: "a.txt", review },
+    { stem: "b", image: "b.jpg", labels: "b.txt", review },
+    { stem: "c", image: "c.jpg", labels: "c.txt", review },
+  ] }]);
+  vi.mocked(datasetApi.saveDatasetLabels).mockResolvedValue(undefined);
+  vi.mocked(datasetApi.saveDatasetReview).mockResolvedValue(undefined);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("10 20 110 120 person 0")));
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Open dataset autosave" }));
+  await screen.findByText("person", { exact: true });
+}
+
+it("automatically saves edited dataset annotations without pressing Save", async () => {
+  const user = userEvent.setup();
+  await openAutosaveFixture(user);
+  await renameCategory(user, "person", "automatic");
+  await waitFor(() => expect(datasetApi.saveDatasetLabels).toHaveBeenCalledWith("autosave", "a.txt", expect.stringContaining("automatic")), { timeout: 2000 });
+  await waitFor(() => expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved"));
+});
+
+it("flushes changes before navigation and stays on the image if saving fails", async () => {
+  const user = userEvent.setup();
+  await openAutosaveFixture(user);
+  vi.mocked(datasetApi.saveDatasetLabels).mockRejectedValue(new Error("offline"));
+  await renameCategory(user, "person", "keep me");
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+  await screen.findByRole("dialog", { name: "Could not save annotations" });
+  expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg");
+  expect(screen.getByText("keep me", { exact: true })).toBeVisible();
+  expect(screen.getByLabelText("Save status")).toHaveTextContent("保存失败");
+});
+
+it("prompts for pending review, honors the chosen direction, suppresses per session, and resets on home", async () => {
+  const user = userEvent.setup();
+  await openAutosaveFixture(user, "pending");
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+  let dialog = await screen.findByRole("dialog", { name: "请选择审核意见" });
+  expect(within(dialog).getByRole("radio", { name: "待审核" })).toBeChecked();
+  await user.click(within(dialog).getByRole("radio", { name: "待审核" }));
+  await user.click(within(dialog).getByRole("checkbox", { name: "本次会话不再提示" }));
+  await user.click(within(dialog).getByRole("button", { name: "确认并翻页" }));
+  await waitFor(() => expect(screen.getByLabelText("Open files")).toHaveTextContent("b.jpg"));
+  expect(sessionStorage.getItem("rec-annotation-editor:skip-pending-review")).toBe("1");
+  await user.click(screen.getByRole("button", { name: "Previous image" }));
+  await waitFor(() => expect(screen.getByLabelText("Open files")).toHaveTextContent("a.jpg"));
+  expect(screen.queryByRole("dialog", { name: "请选择审核意见" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Home" }));
+  await user.click(await screen.findByRole("button", { name: "Open dataset autosave" }));
+  await screen.findByText("person", { exact: true });
+  expect(sessionStorage.getItem("rec-annotation-editor:skip-pending-review")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+  dialog = await screen.findByRole("dialog", { name: "请选择审核意见" });
+  await user.click(within(dialog).getByRole("radio", { name: "审核通过" }));
+  await user.click(within(dialog).getByRole("button", { name: "确认并翻页" }));
+  await waitFor(() => expect(screen.getByLabelText("Open files")).toHaveTextContent("b.jpg"));
+  expect(datasetApi.saveDatasetReview).toHaveBeenCalledWith("autosave", "a", "approved");
+});
+
+it("saves an Undo made while an older autosave is still in flight", async () => {
+  const user = userEvent.setup();
+  await openAutosaveFixture(user);
+  let finish!: () => void;
+  vi.mocked(datasetApi.saveDatasetLabels).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  await renameCategory(user, "person", "changed");
+  await waitFor(() => expect(datasetApi.saveDatasetLabels).toHaveBeenCalledOnce(), { timeout: 2000 });
+  await user.click(screen.getByRole("button", { name: "Undo" }));
+  await act(async () => finish());
+  await waitFor(() => expect(datasetApi.saveDatasetLabels).toHaveBeenCalledTimes(2), { timeout: 2500 });
+  expect(vi.mocked(datasetApi.saveDatasetLabels).mock.calls[1]![2]).toContain("person");
+  expect(vi.mocked(datasetApi.saveDatasetLabels).mock.calls[1]![2]).not.toContain("changed");
+  await waitFor(() => expect(screen.getByLabelText("Save status")).toHaveTextContent("Saved"));
+});
+
+it("locks the editor while Home waits for the latest annotations to save", async () => {
+  const user = userEvent.setup();
+  await openAutosaveFixture(user);
+  let finish!: () => void;
+  vi.mocked(datasetApi.saveDatasetLabels).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  await renameCategory(user, "person", "changed");
+  await user.click(screen.getByRole("button", { name: "Home" }));
+  await waitFor(() => expect(datasetApi.saveDatasetLabels).toHaveBeenCalledOnce());
+  expect(screen.getByLabelText("Image workspace").closest("[inert]")).not.toBeNull();
+  await act(async () => finish());
+  expect(await screen.findByRole("button", { name: "Open dataset autosave" })).toBeVisible();
+});
+
+it("allows Home to cancel a slow next image after saving has finished", async () => {
+  const user = userEvent.setup();
+  vi.mocked(datasetApi.listDatasets).mockResolvedValue([{ name: "slow", items: [
+    { stem: "a", image: "a.jpg", labels: null, review: "approved" },
+    { stem: "b", image: "b.jpg", labels: null, review: "approved" },
+  ] }]);
+  const { images } = mockDeferredImageEnvironment();
+  mockViewportEnvironment();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Open dataset slow" }));
+  await settleDeferred(() => images[0]!.succeed(1000, 800));
+  await user.click(screen.getByRole("button", { name: "Next image" }));
+  await screen.findByText("Loading image: b…");
+  await user.click(screen.getByRole("button", { name: "Back to datasets" }));
+  expect(await screen.findByRole("button", { name: "Open dataset slow" })).toBeVisible();
+  await settleDeferred(() => images[1]!.succeed(1000, 800));
+  expect(window.location.pathname).toBe("/");
 });

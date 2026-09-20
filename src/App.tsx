@@ -11,20 +11,31 @@ import {
   downloadText,
   isFileSystemAccessBlockedError,
   loadImageFile,
-  loadImageFromUrl,
   partitionDroppedFiles,
   pickTextFile,
   readTextFile,
   saveTextAs,
   writeTextToHandle,
 } from "./app/fileIO";
+import { SaveQueue } from "./app/saveQueue";
+import { ReviewBeforeNavigateDialog } from "./components/ReviewBeforeNavigateDialog";
+import { ImageWindow } from "./app/imageWindow";
+import { usePageHistory } from "./app/usePageHistory";
 import { useMediaQuery } from "./app/useMediaQuery";
 import { nextReferenceId, parseReferenceBoxes } from "./domain/reference";
 import {
+  REVIEW_LABELS,
+  nextItemAfterReview,
+  reviewStatusOf,
+  type ReviewStatus,
+} from "./domain/review";
+import {
+  listDatasets,
   datasetImageUrl,
   datasetLabelsUrl,
   datasetOriginalsUrl,
   saveDatasetLabels,
+  saveDatasetReview,
   type DatasetItem,
 } from "./app/datasetApi";
 import {
@@ -78,6 +89,11 @@ interface ImportFiles {
 const PICKER_BLOCKED_NOTICE =
   "Direct file access is blocked in this context — use the classic file dialog.";
 
+/** A review decision is retried a couple of times before it is called lost. */
+const REVIEW_PROMPT_KEY = "rec-annotation-editor:skip-pending-review";
+const REVIEW_WRITE_ATTEMPTS = 3;
+const REVIEW_WRITE_RETRY_MS = 500;
+
 interface ErrorReport {
   title: string;
   issues: readonly ErrorDialogIssue[];
@@ -118,6 +134,8 @@ interface DatasetView {
   stem: string;
   labelsFile: string;
   items: readonly DatasetItem[];
+  /** Review state of this image, kept with it while it stays open. */
+  review: ReviewStatus;
 }
 
 interface DatasetNavigation {
@@ -246,11 +264,25 @@ function EditorWorkspace(): JSX.Element {
   /** Dataset the file manager should expand when it opens. */
   const [managedDataset, setManagedDataset] = useState<string | null>(null);
   /** The editor opens on the dataset home so imports are one click away. */
-  const [view, setView] = useState<"home" | "editor">("home");
+  const [view, setView] = useState<"home" | "editor">(
+    () => window.location.pathname === "/editor" ? "editor" : "home",
+  );
+  const [loadingItem, setLoadingItem] = useState<string | null>(null);
+  const imageWindowRef = useRef(new ImageWindow());
+  const itemAbortRef = useRef<AbortController | null>(null);
+  const restorePageRef = useRef<(url: URL) => void>(() => {});
   const [homeRefreshToken, setHomeRefreshToken] = useState(0);
   const [datasetView, setDatasetView] = useState<DatasetView | null>(null);
   /** Mirrors `datasetView` for callbacks that must not wait for a render. */
   const datasetViewRef = useRef<DatasetView | null>(null);
+  const saveQueueRef = useRef(new SaveQueue());
+  const saveRef = useRef<(automatic?: boolean) => Promise<boolean>>(async () => true);
+  const flushSaveRef = useRef<() => Promise<boolean>>(async () => true);
+  const navigationBusyRef = useRef(false);
+  const [navigationBusy, setNavigationBusy] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [reviewPrompt, setReviewPrompt] = useState<DatasetItem | null>(null);
+  const reviewSuppressedRef = useRef(false);
   const [pendingSwitch, setPendingSwitch] = useState<DatasetItem | null>(null);
   /** Expression whose boxes the user asked to delete, awaiting confirmation. */
   const [pendingCategoryDelete, setPendingCategoryDelete] = useState<
@@ -268,11 +300,11 @@ function EditorWorkspace(): JSX.Element {
   );
   const [referenceEditing, setReferenceEditing] = useState(false);
   /**
-   * Whether the originals are drawn. They are nothing but a reference for
+   * Originals start hidden for every image. They are a reference for
    * adding boxes, so hiding them is always reversible and adding a box brings
    * them back on its own.
    */
-  const [referenceVisible, setReferenceVisible] = useState(true);
+  const [referenceVisible, setReferenceVisible] = useState(false);
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(
     null,
   );
@@ -310,7 +342,10 @@ function EditorWorkspace(): JSX.Element {
   const effectiveDirty = state.dirty || pendingCoordinateIds.size > 0;
   const effectiveDirtyRef = useRef(false);
   effectiveDirtyRef.current = effectiveDirty;
-  useUnsavedWarning(effectiveDirty);
+  const leaveDirtyRef = useRef(false);
+  leaveDirtyRef.current = effectiveDirty || autoSaveStatus === "saving";
+  useUnsavedWarning(leaveDirtyRef.current);
+  const recordPage = usePageHistory(restorePageRef, leaveDirtyRef);
   const imageBounds = useMemo<ImageBounds | null>(
     () =>
       state.image
@@ -359,7 +394,7 @@ function EditorWorkspace(): JSX.Element {
   const clearReference = useCallback(() => {
     setReferenceBoxes([]);
     setReferenceEditing(false);
-    setReferenceVisible(true);
+    setReferenceVisible(false);
     setSelectedReferenceId(null);
   }, []);
 
@@ -392,7 +427,7 @@ function EditorWorkspace(): JSX.Element {
       }
       setReferenceBoxes(parsed.boxes);
       setReferenceEditing(false);
-      setReferenceVisible(true);
+      setReferenceVisible(false);
       setSelectedReferenceId(null);
       setNotice(
         `Loaded ${parsed.boxes.length} original ${
@@ -572,6 +607,7 @@ function EditorWorkspace(): JSX.Element {
       datasetName: string,
       item: DatasetItem,
       siblings: readonly DatasetItem[] = [],
+      historyMode: "record" | "restore" = "record",
     ) => {
       const labelsFile = item.labels;
       const imageFile = item.image;
@@ -584,7 +620,22 @@ function EditorWorkspace(): JSX.Element {
         });
         return;
       }
+      const previousDataset = datasetViewRef.current;
+      const previousUrl = previousDataset
+        ? `/editor?${new URLSearchParams({ dataset: previousDataset.dataset, image: previousDataset.stem })}`
+        : "/editor";
+      let committed = false;
       const generation = ++importGenerationRef.current;
+      itemAbortRef.current?.abort();
+      const controller = new AbortController();
+      itemAbortRef.current = controller;
+      setView("editor");
+      setLoadingItem(item.stem);
+      setDatasetDialogOpen(false);
+      if (historyMode === "record") {
+        recordPage(`/editor?${new URLSearchParams({ dataset: datasetName, image: item.stem })}`,
+          window.location.pathname === "/editor" && !!datasetViewRef.current);
+      }
       const isCurrent = () =>
         mountedRef.current && importGenerationRef.current === generation;
       try {
@@ -597,10 +648,20 @@ function EditorWorkspace(): JSX.Element {
         setErrorReport(null);
         setNotice(null);
 
+        const ready = openableDatasetItems(siblings.length ? siblings : [item]);
+        const imagePromise = imageWindowRef.current.focus(
+          ready.map(entry => ({ url: datasetImageUrl(datasetName, entry.image!), name: entry.image! })),
+          ready.findIndex(entry => entry.stem === item.stem),
+        );
+        const originalsPromise = item.originals
+          ? fetch(datasetOriginalsUrl(datasetName, item.originals), { signal: controller.signal })
+              .then(response => response.ok ? response.text() : null).catch(() => null)
+          : Promise.resolve(null);
         let annotations: Annotation[] = [];
         if (labelsFile) {
           const labelsResponse = await fetch(
             datasetLabelsUrl(datasetName, labelsFile),
+            { signal: controller.signal },
           );
           if (!labelsResponse.ok) {
             throw new Error(
@@ -623,10 +684,7 @@ function EditorWorkspace(): JSX.Element {
           annotations = parsed.annotations;
         }
 
-        const image = await loadImageFromUrl(
-          datasetImageUrl(datasetName, imageFile),
-          imageFile,
-        );
+        const image = await imagePromise;
         if (!isCurrent()) return;
 
         // Dataset JSONL files store normalized [0, 1000] targets.
@@ -641,23 +699,10 @@ function EditorWorkspace(): JSX.Element {
         // The picking pool belongs to the item that was open.
         clearReference();
 
-        // An item that ships original annotations opens with them ready to pick.
-        if (item.originals) {
-          try {
-            const originalsResponse = await fetch(
-              datasetOriginalsUrl(datasetName, item.originals),
-            );
-            if (originalsResponse.ok) {
-              const originalsText = await originalsResponse.text();
-              if (!isCurrent()) return;
-              applyReference(item.originals, originalsText, {
-                width: image.width,
-                height: image.height,
-              });
-            }
-          } catch {
-            // Unreadable originals only cost the picking pool, not the item.
-          }
+        const originalsText = await originalsPromise;
+        if (!isCurrent()) return;
+        if (item.originals && originalsText !== null) {
+          applyReference(item.originals, originalsText, { width: image.width, height: image.height });
         }
 
         // Without labels the item opens as an empty document; saving creates
@@ -669,7 +714,12 @@ function EditorWorkspace(): JSX.Element {
           stem: item.stem,
           labelsFile: labelFileName,
           items: siblings.length > 0 ? siblings : [item],
+          review: reviewStatusOf(item),
         };
+        labelHandleRef.current = null;
+        const localImageUrl = acceptedImageUrlRef.current;
+        acceptedImageUrlRef.current = null;
+        if (localImageUrl) URL.revokeObjectURL(localImageUrl);
         datasetViewRef.current = datasetViewValue;
         setDatasetView(datasetViewValue);
         setView("editor");
@@ -686,17 +736,103 @@ function EditorWorkspace(): JSX.Element {
             `No label file yet for "${item.stem}" — draw boxes and Save to create one.`,
           );
         }
-        setDatasetDialogOpen(false);
+        committed = true;
+        imageWindowRef.current.prefetch();
       } catch (error) {
         if (!isCurrent()) return;
         setErrorReport({
           title: "Could not open dataset item",
           issues: [errorMessage(error)],
         });
+      } finally {
+        if (isCurrent()) {
+          setLoadingItem(null);
+          if (!committed) {
+            controller.abort();
+            imageWindowRef.current.clear();
+            if (previousDataset || stateRef.current.image) recordPage(previousUrl, true);
+          }
+        }
       }
     },
-    [dispatch],
+    [dispatch, recordPage],
   );
+  const goHome = async () => {
+    // Once saving has finished, Home may cancel a slow image request.
+    if (loadingItem !== null) {
+      recordPage("/");
+      restorePageRef.current(new URL(window.location.href));
+      return;
+    }
+    if (navigationBusyRef.current) return;
+    const generation = importGenerationRef.current;
+    navigationBusyRef.current = true;
+    setNavigationBusy(true);
+    try {
+      const writable = datasetViewRef.current || labelHandleRef.current;
+      if (writable && !(await flushSaveRef.current())) return;
+      if (importGenerationRef.current !== generation) return;
+      if (!writable && effectiveDirtyRef.current && !window.confirm("Discard unsaved changes and leave this page?")) return;
+      recordPage("/");
+      restorePageRef.current(new URL(window.location.href));
+    } finally {
+      navigationBusyRef.current = false;
+      setNavigationBusy(false);
+    }
+  };
+  restorePageRef.current = (url) => {
+    const generation = ++importGenerationRef.current;
+    itemAbortRef.current?.abort();
+    imageWindowRef.current.clear();
+    setLoadingItem(null);
+    setDatasetDialogOpen(false);
+    setErrorReport(null);
+    setPendingSwitch(null);
+    setReviewPrompt(null);
+    setAutoSaveStatus("idle");
+    // A page transition discards the prior document only after the leave guard.
+    labelHandleRef.current = null;
+    normalizedSourceRef.current = false;
+    const localImageUrl = acceptedImageUrlRef.current;
+    acceptedImageUrlRef.current = null;
+    if (localImageUrl) URL.revokeObjectURL(localImageUrl);
+    setDraftBBox(null);
+    setDraftLabel(null);
+    setActiveLabel(null);
+    setHighlightedLabel(null);
+    setNotice(null);
+    setPendingCoordinateIds(new Set());
+    datasetViewRef.current = null;
+    setDatasetView(null);
+    if (stateRef.current.image || stateRef.current.labelFileName || stateRef.current.annotations.length) {
+      dispatch({ type: "SET_IMAGE", image: null });
+      dispatch({ type: "LOAD_ANNOTATIONS", annotations: [], fileName: null });
+    }
+    clearReference();
+    if (url.pathname !== "/editor") {
+      reviewSuppressedRef.current = false;
+      try { sessionStorage.removeItem(REVIEW_PROMPT_KEY); } catch {}
+      setView("home");
+      if (view !== "home") setHomeRefreshToken(token => token + 1);
+      return;
+    }
+    setView("editor");
+    const dataset = url.searchParams.get("dataset");
+    const stem = url.searchParams.get("image");
+    if (!dataset || !stem) return;
+    setLoadingItem(stem);
+    void listDatasets().then(datasets => {
+      if (!mountedRef.current || importGenerationRef.current !== generation) return;
+      const items = datasets.find(entry => entry.name === dataset)?.items ?? [];
+      const item = items.find(entry => entry.stem === stem);
+      if (!item?.image) throw new Error("This dataset image no longer exists.");
+      void openDatasetItem(dataset, item, items, "restore");
+    }).catch(error => {
+      if (!mountedRef.current || importGenerationRef.current !== generation) return;
+      setLoadingItem(null);
+      setErrorReport({ title: "Could not open dataset item", issues: [errorMessage(error)] });
+    });
+  };
   const handleCoordinateDraftChange = useCallback(
     (id: string, pending: boolean) => {
       setPendingCoordinateIds((current) => {
@@ -714,6 +850,8 @@ function EditorWorkspace(): JSX.Element {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      itemAbortRef.current?.abort();
+      imageWindowRef.current.clear();
       importGenerationRef.current += 1;
       const acceptedUrl = acceptedImageUrlRef.current;
       acceptedImageUrlRef.current = null;
@@ -863,10 +1001,13 @@ function EditorWorkspace(): JSX.Element {
       return;
     }
 
-    if (files.labels) {
-      labelHandleRef.current = labelHandle;
+    if (files.labels) labelHandleRef.current = labelHandle;
+    if (files.labels || loadedImage) {
       datasetViewRef.current = null;
       setDatasetView(null);
+      itemAbortRef.current?.abort();
+      imageWindowRef.current.clear();
+      recordPage("/editor", true);
     }
 
     if (loadedImage) {
@@ -975,33 +1116,18 @@ function EditorWorkspace(): JSX.Element {
   };
 
   // Boxes only reach the canvas for a picked category, a hovered category, or
-  // the selected box — a fresh document starts with a clean image. Two things
-  // override that while originals are loaded: an accepted original stays drawn
-  // (otherwise picking it would look like deleting it), and while the originals
-  // are being edited they step aside so their own layer can be worked on.
-  const visibleAnnotations = useMemo(() => {
-    const visible = visibleCanvasAnnotations(state.annotations, {
-      activeLabel,
-      highlightedLabel,
-      selectedId: state.selectedId,
-    });
-    if (referenceEditing) {
-      return visible.filter((annotation) => !annotation.referenceId);
-    }
-    if (referenceBoxes.length === 0) return visible;
-
-    const shown = new Set(visible.map((annotation) => annotation.id));
-    return state.annotations.filter(
-      (annotation) => shown.has(annotation.id) || annotation.referenceId,
-    );
-  }, [
-    state.annotations,
-    activeLabel,
-    highlightedLabel,
-    state.selectedId,
-    referenceBoxes.length,
-    referenceEditing,
-  ]);
+  // the selected box — a fresh document starts with a clean image. A box copied
+  // from an original follows the same rule as any other box: the link to its
+  // reference is bookkeeping, never a reason to stay on the canvas.
+  const visibleAnnotations = useMemo(
+    () =>
+      visibleCanvasAnnotations(state.annotations, {
+        activeLabel,
+        highlightedLabel,
+        selectedId: state.selectedId,
+      }),
+    [state.annotations, activeLabel, highlightedLabel, state.selectedId],
+  );
   useEffect(() => {
     const id = pendingLocateIdRef.current;
     if (id === null) return;
@@ -1037,6 +1163,115 @@ function EditorWorkspace(): JSX.Element {
     },
     [openDatasetItem],
   );
+  /** Moves to another item of the same dataset, unless that would drop edits. */
+  const openItemWithGuard = useCallback(
+    async (target: DatasetItem) => {
+      const view = datasetViewRef.current;
+      if (!view || navigationBusyRef.current) return;
+      navigationBusyRef.current = true;
+      setNavigationBusy(true);
+      try {
+        if (!(await flushSaveRef.current())) return;
+        if (datasetViewRef.current?.stem !== view.stem || datasetViewRef.current?.dataset !== view.dataset) return;
+        setPendingSwitch(null);
+        await openDatasetItem(view.dataset, target, datasetViewRef.current.items);
+      } finally {
+        navigationBusyRef.current = false;
+        setNavigationBusy(false);
+      }
+    },
+    [openDatasetItem],
+  );
+
+  /**
+   * Writes a review decision from behind the editor. A dev server that
+   * restarts under the page fails for a moment, so the write is retried a
+   * couple of times first. Only when it keeps failing is the decision given
+   * up on: that image goes back to the state the server still has and the
+   * reason is shown — a choice that never reached the disk must not look
+   * saved, whichever image the editor has moved on to meanwhile.
+   */
+  const persistReview = useCallback(
+    async (write: {
+      dataset: string;
+      stem: string;
+      status: ReviewStatus;
+      previous: ReviewStatus;
+    }): Promise<boolean> => {
+      for (let attempt = 1; attempt <= REVIEW_WRITE_ATTEMPTS; attempt += 1) {
+        try {
+          await saveDatasetReview(write.dataset, write.stem, write.status);
+          return true;
+        } catch (error) {
+          if (attempt < REVIEW_WRITE_ATTEMPTS) {
+            await new Promise((resolve) => {
+              setTimeout(resolve, REVIEW_WRITE_RETRY_MS * attempt);
+            });
+            continue;
+          }
+          const current = datasetViewRef.current;
+          if (current) {
+            // Roll back that one decision: a newer choice on the same image,
+            // or anything done meanwhile, is left alone.
+            const items = current.items.map((item) =>
+              item.stem === write.stem && item.review === write.status
+                ? { ...item, review: write.previous }
+                : item,
+            );
+            const rolled =
+              current.stem === write.stem && current.review === write.status
+                ? { ...current, review: write.previous, items }
+                : { ...current, items };
+            datasetViewRef.current = rolled;
+            setDatasetView(rolled);
+          }
+          setNotice(
+            `Could not save the review status for "${write.stem}" (${errorMessage(
+              error,
+            )}). It is still ${REVIEW_LABELS[write.previous]}.`,
+          );
+        }
+      }
+      return false;
+    },
+    [],
+  );
+
+  /**
+   * Records the review decision of the open image: the toolbar flips at once
+   * and the write happens behind it. A failure rolls the choice back and says
+   * why, so a decision is never lost silently. Deciding is the end of an
+   * image's turn, so the editor moves on to the next one still waiting for
+   * review; "待审核" is not a decision and stays where it is.
+   */
+  const handleReviewChange = useCallback(
+    (status: ReviewStatus) => {
+      const view = datasetViewRef.current;
+      if (!view || view.review === status) return;
+      // Keep the local list truthful, the next decision walks from it.
+      const items = view.items.map((item) =>
+        item.stem === view.stem ? { ...item, review: status } : item,
+      );
+      const decided = { ...view, review: status, items };
+      datasetViewRef.current = decided;
+      setDatasetView(decided);
+      void persistReview({
+        dataset: view.dataset,
+        stem: view.stem,
+        status,
+        previous: view.review,
+      });
+      if (status === "pending") return;
+      const target = nextItemAfterReview(items, view.stem);
+      if (!target) {
+        showToast("No other image is waiting for review.");
+        return;
+      }
+      openItemWithGuard(target);
+    },
+    [openItemWithGuard, persistReview, showToast],
+  );
+
   const stepDatasetItem = useCallback(
     (direction: -1 | 1) => {
       const view = datasetViewRef.current;
@@ -1045,21 +1280,50 @@ function EditorWorkspace(): JSX.Element {
       const index = ready.findIndex((item) => item.stem === view.stem);
       if (index < 0) return;
       const target = ready[index + direction];
-      if (!target) return;
-      // Unsaved edits are never dropped silently.
-      if (effectiveDirtyRef.current) {
-        setPendingSwitch(target);
+      if (!target || navigationBusyRef.current) return;
+      try { reviewSuppressedRef.current = sessionStorage.getItem(REVIEW_PROMPT_KEY) === "1"; } catch {}
+      if (view.review === "pending" && !reviewSuppressedRef.current) {
+        setReviewPrompt(target);
         return;
       }
-      setPendingSwitch(null);
-      void openDatasetItem(view.dataset, target, view.items);
+      void openItemWithGuard(target);
     },
-    [openDatasetItem],
+    [openItemWithGuard],
   );
 
-  const save = async () => {
+  const confirmReviewNavigation = async (status: ReviewStatus, suppress: boolean) => {
+    const view = datasetViewRef.current;
+    const target = reviewPrompt;
+    if (!view || !target) return;
+    if (!(await flushSaveRef.current())) { setReviewPrompt(null); return; }
+    if (status !== view.review) {
+      const saved = await persistReview({ dataset: view.dataset, stem: view.stem, status, previous: view.review });
+      if (!saved) { setReviewPrompt(null); return; }
+      if (datasetViewRef.current !== view) return;
+      const updated = { ...view, review: status,
+        items: view.items.map(item => item.stem === view.stem ? { ...item, review: status } : item) };
+      datasetViewRef.current = updated;
+      setDatasetView(updated);
+    }
+    reviewSuppressedRef.current = suppress;
+    try {
+      if (suppress) sessionStorage.setItem(REVIEW_PROMPT_KEY, "1");
+      else sessionStorage.removeItem(REVIEW_PROMPT_KEY);
+    } catch {}
+    setReviewPrompt(null);
+    await openItemWithGuard(target);
+  };
+
+  const save = async (automatic = false): Promise<boolean> => {
     const latestState = stateRef.current;
     const snapshot = latestState.annotations;
+    const datasetTarget = datasetViewRef.current;
+    const handleTarget = labelHandleRef.current;
+    const generation = importGenerationRef.current;
+    if (automatic && !datasetTarget && !handleTarget) return false;
+    return saveQueueRef.current.run(async () => {
+    const isCurrent = () => mountedRef.current && importGenerationRef.current === generation;
+    if (isCurrent()) setAutoSaveStatus("saving");
     const fileName = editedTxtName(
       latestState.labelFileName,
       latestState.image?.name ?? null,
@@ -1072,32 +1336,33 @@ function EditorWorkspace(): JSX.Element {
       const contents = saveJsonl
         ? serializeAnnotationsJsonl(snapshot, jsonlScale)
         : serializeAnnotationsTxt(snapshot);
-      if (datasetViewRef.current) {
-        const { dataset, labelsFile } = datasetViewRef.current;
+      if (datasetTarget) {
+        const { dataset, labelsFile } = datasetTarget;
         try {
           await saveDatasetLabels(dataset, labelsFile, contents);
-          setNotice(`Saved "${labelsFile}" to dataset "${dataset}".`);
+          if (isCurrent()) setNotice(`Saved "${labelsFile}" to dataset "${dataset}".`);
         } catch (error) {
-          setErrorReport({
+          if (isCurrent()) setErrorReport({
             title: "Could not save annotations",
             issues: [errorMessage(error)],
           });
-          return;
+          if (isCurrent()) setAutoSaveStatus("error");
+          return false;
         }
-      } else if (labelHandleRef.current) {
+      } else if (handleTarget) {
         try {
-          await writeTextToHandle(labelHandleRef.current, contents);
-          setNotice(
+          await writeTextToHandle(handleTarget, contents);
+          if (isCurrent()) setNotice(
             `Saved "${latestState.labelFileName ?? "annotations"}" in place.`,
           );
         } catch (error) {
-          if (!isFileSystemAccessBlockedError(error)) throw error;
+          if (automatic || !isFileSystemAccessBlockedError(error)) throw error;
           downloadText(
             contents,
             fileName,
             saveJsonl ? "application/x-ndjson" : "text/plain",
           );
-          setNotice(
+          if (isCurrent()) setNotice(
             `Downloaded "${fileName}". Direct file access is blocked in this context.`,
           );
         }
@@ -1107,21 +1372,48 @@ function EditorWorkspace(): JSX.Element {
           fileName,
           saveJsonl ? "application/x-ndjson" : "text/plain",
         );
-        setNotice(
+        if (isCurrent()) setNotice(
           `Downloaded "${fileName}". This browser cannot write back to the imported file.`,
         );
       }
-      if (stateRef.current.annotations === snapshot) {
-        dispatch({ type: "MARK_SAVED" });
-      }
+      if (isCurrent()) dispatch({ type: "MARK_SAVED_SNAPSHOT", annotations: snapshot });
+      if (isCurrent()) setAutoSaveStatus("idle");
+      return true;
     } catch (error) {
-      if (isAbortError(error)) return;
-      setErrorReport({
+      if (isCurrent()) setAutoSaveStatus("error");
+      if (isAbortError(error)) return false;
+      if (isCurrent()) setErrorReport({
         title: "Could not save annotations",
         issues: [errorMessage(error)],
       });
+      return false;
     }
+    });
   };
+  saveRef.current = save;
+  flushSaveRef.current = async () => {
+    const generation = importGenerationRef.current;
+    blurPendingDraft();
+    while (importGenerationRef.current === generation) {
+      await saveQueueRef.current.idle();
+      // Let React apply the persisted baseline, including an Undo during a write.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (importGenerationRef.current !== generation) return false;
+      if (pendingCoordinateIds.size > 0 || stateRef.current.transactionBase !== null) {
+        setNotice("Please finish the current annotation edit before switching images.");
+        return false;
+      }
+      if (!stateRef.current.dirty) return true;
+      if (!(await saveRef.current(true))) return false;
+    }
+    return false;
+  };
+  useEffect(() => {
+    if (!state.dirty || state.transactionBase !== null || pendingCoordinateIds.size > 0 ||
+        loadingItem !== null || view !== "editor" || (!datasetView && !labelHandleRef.current)) return;
+    const timer = window.setTimeout(() => { void saveRef.current(true); }, 600);
+    return () => window.clearTimeout(timer);
+  }, [state.annotations, state.dirty, state.savedFingerprint, state.transactionBase, pendingCoordinateIds, datasetView, loadingItem, view]);
 
   const saveAs = async () => {
     const latestState = stateRef.current;
@@ -1202,6 +1494,7 @@ function EditorWorkspace(): JSX.Element {
   };
 
   useKeyboardShortcuts({
+    enabled: view === "editor" && loadingItem === null && reviewPrompt === null && !navigationBusy,
     onPreviousItem: () => runAfterEditorBlur(() => stepDatasetItem(-1)),
     onNextItem: () => runAfterEditorBlur(() => stepDatasetItem(1)),
     onUndo: () =>
@@ -1235,7 +1528,7 @@ function EditorWorkspace(): JSX.Element {
       {view === "home" ? (
         <DatasetHome
           refreshToken={homeRefreshToken}
-          onOpenEditor={() => setView("editor")}
+          onOpenEditor={() => { recordPage("/editor"); setView("editor"); }}
           onOpenItem={(datasetName, item, items) =>
             void openDatasetItem(datasetName, item, items)
           }
@@ -1246,14 +1539,27 @@ function EditorWorkspace(): JSX.Element {
         />
       ) : (
         <>
+      {loadingItem !== null && !state.image ? (
+        <main className="workspace-empty" aria-busy="true">
+          <p role="status">Loading image: {loadingItem}…</p>
+          <button type="button" onClick={goHome}>Back to datasets</button>
+        </main>
+      ) : <>
+      {loadingItem !== null ? (
+        <div role="status" style={{ position: "fixed", inset: 0, zIndex: 1000,
+          display: "grid", placeContent: "center", background: "rgba(20, 24, 30, 0.8)", color: "white" }}>
+          <p>Loading image: {loadingItem}…</p>
+          <button type="button" onClick={goHome}>Back to datasets</button>
+        </div>
+      ) : null}
+      <div style={{ display: "contents" }} {...(loadingItem !== null || reviewPrompt !== null || navigationBusy ? { inert: "" } : {})}>
       <Toolbar
-        onHome={() => {
-          setHomeRefreshToken((token) => token + 1);
-          setView("home");
-        }}
+        onHome={goHome}
         imageName={state.image?.name ?? null}
         labelFileName={state.labelFileName}
         dirty={effectiveDirty}
+        autoSaveStatus={autoSaveStatus}
+        autoSaveEnabled={datasetView !== null || labelHandleRef.current !== null}
         scale={zoomScale}
         labelPickerBlocked={labelPickerBlocked}
         onOpenImage={(file) => void importFiles({ image: file })}
@@ -1302,6 +1608,8 @@ function EditorWorkspace(): JSX.Element {
         datasetNavigation={datasetNavigation}
         onPreviousItem={() => stepDatasetItem(-1)}
         onNextItem={() => stepDatasetItem(1)}
+        reviewStatus={datasetView?.review ?? null}
+        onReviewChange={handleReviewChange}
       />
       <main className="editor-layout">
         <section
@@ -1413,8 +1721,11 @@ function EditorWorkspace(): JSX.Element {
         notice={notice}
         scale={zoomScale}
       />
+      </div>
+      </>}
         </>
       )}
+      {reviewPrompt ? <ReviewBeforeNavigateDialog initialStatus={datasetViewRef.current?.review ?? "pending"} onConfirm={confirmReviewNavigation} onCancel={() => setReviewPrompt(null)} /> : null}
       <ErrorDialog
         title={errorReport?.title ?? "Import error"}
         issues={errorReport?.issues ?? []}

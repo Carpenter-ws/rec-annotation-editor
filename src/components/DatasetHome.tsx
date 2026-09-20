@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import {
   createDataset,
-  datasetImageUrl,
+  datasetThumbnailUrl,
   deleteDataset,
   listDatasets,
   type DatasetItem,
   type DatasetSummary,
 } from "../app/datasetApi";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { firstPendingItem, reviewCounts } from "../domain/review";
 
 const PREVIEW_LIMIT = 3;
 
@@ -230,10 +231,14 @@ export function DatasetHome({
                 const withLabels = dataset.items.filter(
                   (item) => item.labels !== null,
                 ).length;
-                const first = withImages[0] ?? null;
+                // Opening a dataset picks up the review pass where it stopped:
+                // the first image still waiting for a decision.
+                const first =
+                  withImages.length > 0 ? firstPendingItem(withImages) : null;
                 const previews = withImages.slice(0, PREVIEW_LIMIT);
                 const missingImages = total - withImages.length;
                 const missingLabels = total - withLabels;
+                const statuses = reviewCounts(dataset.items);
 
                 return (
                   <li
@@ -265,9 +270,10 @@ export function DatasetHome({
                         previews.map((item) => (
                           <img
                             key={item.stem}
-                            src={datasetImageUrl(dataset.name, item.image!)}
+                            src={datasetThumbnailUrl(dataset.name, item.image!)}
                             alt=""
                             loading="lazy"
+                            decoding="async"
                           />
                         ))
                       ) : (
@@ -290,6 +296,15 @@ export function DatasetHome({
                         {countLabel(total, "item")} · {withImages.length} with
                         images · {withLabels} with labels
                       </p>
+                      {total > 0 ? (
+                        <p
+                          className="dataset-card-review"
+                          data-testid={`dataset-review-${dataset.name}`}
+                        >
+                          审核：待审核 {statuses.pending} · 通过{" "}
+                          {statuses.approved} · 打回 {statuses.rejected}
+                        </p>
+                      ) : null}
                       {missingImages > 0 || missingLabels > 0 ? (
                         <p className="dataset-card-gaps">
                           {missingImages > 0 ? (

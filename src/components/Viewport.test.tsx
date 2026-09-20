@@ -1228,6 +1228,63 @@ it("clamps panning so at least half of the image stays visible", () => {
   expect(imageSpace).toHaveAttribute("data-offset-x", "-480");
 });
 
+it("clamps imperative zoom so at least half of the image stays visible", () => {
+  const viewportRef = createRef<ViewportHandle>();
+  renderViewport({
+    viewportRef,
+    initialTransform: { scale: 0.5, offsetX: 520, offsetY: 430 },
+  });
+
+  act(() => viewportRef.current!.zoomBy(4));
+
+  const imageSpace = screen.getByTestId("image-space");
+  // At scale 2 the image is larger than the viewport, so half of each
+  // viewport dimension must remain covered: x [-3340, 500], y [-1930, 350].
+  expect(imageSpace).toHaveAttribute("data-scale", "2");
+  expect(imageSpace).toHaveAttribute("data-offset-x", "500");
+  expect(imageSpace).toHaveAttribute("data-offset-y", "350");
+});
+
+it("clamps annotation centering to the same half-image bounds", () => {
+  const viewportRef = createRef<ViewportHandle>();
+  renderViewport({
+    viewportRef,
+    annotations: [{
+      id: "far-left",
+      bbox: { x1: 0, y1: 0, x2: 10, y2: 10 },
+      label: "person",
+      reservedField: "0",
+    }],
+  });
+
+  act(() => viewportRef.current!.centerAnnotation("far-left"));
+
+  const imageSpace = screen.getByTestId("image-space");
+  const scale = Number(imageSpace.getAttribute("data-scale"));
+  const offsetX = Number(imageSpace.getAttribute("data-offset-x"));
+  const offsetY = Number(imageSpace.getAttribute("data-offset-y"));
+  const scaledWidth = image.width * scale;
+  const scaledHeight = image.height * scale;
+  const minVisibleWidth = Math.min(scaledWidth / 2, viewportWidth / 2);
+  const minVisibleHeight = Math.min(scaledHeight / 2, viewportHeight / 2);
+  expect(offsetX).toBeGreaterThanOrEqual(minVisibleWidth - scaledWidth);
+  expect(offsetX).toBeLessThanOrEqual(viewportWidth - minVisibleWidth);
+  expect(offsetY).toBeGreaterThanOrEqual(minVisibleHeight - scaledHeight);
+  expect(offsetY).toBeLessThanOrEqual(viewportHeight - minVisibleHeight);
+});
+
+it("reclamps a manually positioned image after the viewport shrinks", () => {
+  renderViewport({
+    initialTransform: { scale: 0.5, offsetX: 520, offsetY: 430 },
+  });
+
+  resizeViewport(500, 300);
+
+  const imageSpace = screen.getByTestId("image-space");
+  expect(imageSpace).toHaveAttribute("data-offset-x", "250");
+  expect(imageSpace).toHaveAttribute("data-offset-y", "150");
+});
+
 it("pans with the middle button while holding pointer capture", () => {
   renderViewport({
     initialTransform: { scale: 0.5, offsetX: 20, offsetY: 30 },

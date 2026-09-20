@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 export interface KeyboardShortcutHandlers {
+  enabled?: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onSave: () => void;
@@ -27,6 +28,7 @@ export function useKeyboardShortcuts(
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (handlersRef.current.enabled === false) return;
       const key = event.key.toLocaleLowerCase();
       const commandKey = event.ctrlKey || event.metaKey;
 

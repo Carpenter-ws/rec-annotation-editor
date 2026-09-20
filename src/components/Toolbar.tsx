@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState, type ChangeEvent, type JSX } from "react";
+import {
+  REVIEW_LABELS,
+  REVIEW_ORDER,
+  type ReviewStatus,
+} from "../domain/review";
 
 export interface ToolbarProps {
   /** Back to the dataset home. */
@@ -6,6 +11,8 @@ export interface ToolbarProps {
   imageName: string | null;
   labelFileName: string | null;
   dirty: boolean;
+  autoSaveStatus?: "idle" | "saving" | "error";
+  autoSaveEnabled?: boolean;
   scale: number;
   onOpenImage: (file: File) => void;
   onOpenLabels: (file: File) => void;
@@ -24,6 +31,9 @@ export interface ToolbarProps {
   selectedOriginal: { id: string; label: string } | null;
   onRenameOriginal: (label: string) => void;
   onDeleteOriginal: () => void;
+  /** Review state of the open dataset item; null for a loose image. */
+  reviewStatus: ReviewStatus | null;
+  onReviewChange: (status: ReviewStatus) => void;
   onOpenDatasets: () => void;
   onSave: () => void;
   onSaveAs: () => void;
@@ -60,6 +70,8 @@ export function Toolbar({
   imageName,
   labelFileName,
   dirty,
+  autoSaveStatus = "idle",
+  autoSaveEnabled = false,
   scale,
   onOpenImage,
   onOpenLabels,
@@ -73,6 +85,8 @@ export function Toolbar({
   selectedOriginal,
   onRenameOriginal,
   onDeleteOriginal,
+  reviewStatus,
+  onReviewChange,
   onOpenDatasets,
   onSave,
   onSaveAs,
@@ -132,6 +146,7 @@ export function Toolbar({
 
   return (
     <header className="toolbar">
+      <div className="toolbar-top-row">
       <h1>REC Annotation Editor</h1>
       <div className="toolbar-files">
         <button type="button" aria-label="Home" onClick={onHome}>
@@ -252,6 +267,15 @@ export function Toolbar({
           Datasets
         </button>
       </div>
+      <div className="toolbar-file-names" aria-label="Open files">
+        <span>{imageName ?? "No image"}</span>
+        <span>{labelFileName ?? "No labels"}</span>
+        <span aria-label="Save status">
+          {autoSaveStatus === "saving" ? (dirty ? "Unsaved changes · 正在保存…" : "正在保存…") : autoSaveStatus === "error" ? "Unsaved changes · 保存失败" : dirty ? "Unsaved changes" : "Saved"}
+        </span>
+      </div>
+      </div>
+      {datasetNavigation ? <div className="toolbar-second-row">
       {datasetNavigation ? (
         <div className="dataset-nav" aria-label="Dataset navigation">
           <button
@@ -279,16 +303,28 @@ export function Toolbar({
           </button>
         </div>
       ) : null}
-      <div className="toolbar-file-names" aria-label="Open files">
-        <span>{imageName ?? "No image"}</span>
-        <span>{labelFileName ?? "No labels"}</span>
-        <span aria-label="Save status">
-          {dirty ? "Unsaved changes" : "Saved"}
-        </span>
-      </div>
+      {reviewStatus !== null ? (
+        <div className="review-picker" role="radiogroup" aria-label="审核意见">
+          <span className="review-picker-label">审核意见：</span>
+          {REVIEW_ORDER.map((status) => (
+            <button
+              key={status}
+              type="button"
+              role="radio"
+              aria-checked={reviewStatus === status}
+              className={`review-option is-${status}`}
+              onClick={() => onReviewChange(status)}
+            >
+              {REVIEW_LABELS[status]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      </div> : null}
       <button type="button" onClick={onSave}>
         Save
       </button>
+      {autoSaveEnabled ? <span className="autosave-indicator">自动保存已开启</span> : null}
       <button type="button" onClick={onSaveAs}>
         Save As
       </button>

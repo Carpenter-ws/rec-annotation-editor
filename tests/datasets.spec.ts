@@ -105,6 +105,49 @@ test("switches between images of one dataset", async ({ page }) => {
   await expandCategories(page);
   await expect(expressionButton(page, "person")).toBeVisible();
 
+  // Every image carries one review decision, and a fresh one is pending.
+  const review = page.getByRole("radiogroup", { name: "审核意见" });
+  await expect(review.getByRole("radio", { name: "待审核" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+
+  // Deciding on an image moves straight on to the next one waiting for review.
+  await review.getByRole("radio", { name: "打回" }).click();
+  await expect(position).toHaveText("2 / 3");
+  await expect(review.getByRole("radio", { name: "待审核" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+
+  // The decision is stored beside the dataset, not inside the label file.
+  const stored = (await (await page.request.get("/api/datasets")).json()) as {
+    name: string;
+    items: { stem: string; review?: string }[];
+  }[];
+  expect(stored.find((entry) => entry.name === "e2e-nav")?.items[0]?.review).toBe(
+    "rejected",
+  );
+
+  // The file manager shows the decisions and can filter by them.
+  await page.getByRole("button", { name: "Datasets" }).click();
+  const manager = page.getByRole("dialog", { name: "Datasets" });
+  await manager
+    .getByRole("button", { name: "Toggle e2e-nav items" })
+    .click();
+  await expect(manager.getByTestId("review-chip-nav-one")).toHaveText("打回");
+  await expect(manager.getByTestId("review-chip-nav-two")).toHaveText("待审核");
+  await manager
+    .getByLabel("Filter e2e-nav by review status")
+    .selectOption("rejected");
+  await expect(manager.getByTestId("review-chip-nav-one")).toHaveText("打回");
+  await expect(manager.getByTestId("review-chip-nav-two")).toHaveCount(0);
+  await manager.getByRole("button", { name: "Close" }).click();
+
+  // Back to the first image, the walk-through below starts from there.
+  await stepImage(page, "Previous image");
+  await expect(position).toHaveText("1 / 3");
+
   // Step to the second item, then back with the toolbar buttons.
   await stepImage(page, "Next image");
   await expect(position).toHaveText("2 / 3");
@@ -163,7 +206,9 @@ test("persists a dataset across page reloads", async ({ page }) => {
   const fileInput = row.getByLabel("Choose dataset files for e2e-dataset");
 
   // First pass: the image alone. It is staged, then shown on the canvas even
-  // without a label file.
+  // without a label file. The dialog locks its file input until the creation
+  // lands, so wait for it the way a user has to.
+  await expect(fileInput).toBeEnabled();
   await fileInput.setInputFiles([example("rec-aerial-scene.svg")]);
   await expect(row.getByTestId("staged-state-rec-aerial-scene")).toHaveText(
     "missing labels",
